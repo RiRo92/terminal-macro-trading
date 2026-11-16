@@ -12,7 +12,7 @@ st.set_page_config(page_title="Terminal Macro & Breaking News: NAS100 & XAUUSD",
 # API Key gratuita de Finnhub (para titulares de noticias en tiempo real)
 FINNHUB_API_KEY = "dbtk2ehr01qtr41fbk30dbtk2ehr01qtr41fbk3g"
 
-# Estilos CSS Responsivos (Detección automática PC vs Celular)
+# Estilos CSS Responsivos (Separación estricta PC vs Celular)
 st.markdown("""
     <style>
         .block-container { padding-top: 3.3rem !important; padding-bottom: 1rem; }
@@ -75,13 +75,6 @@ st.markdown("""
             margin-bottom: 4px;
             font-size: 0.85rem;
         }
-        /* Ajuste de botones del calendario en PC */
-        .solo-pc div[data-testid="column"] button {
-            height: 68px !important;
-            padding: 4px !important;
-            line-height: 1.25 !important;
-            font-size: 0.82rem !important;
-        }
 
         /* Tarjetas móviles limpias (2 líneas, sin scroll horizontal) */
         .mob-card {
@@ -119,33 +112,27 @@ st.markdown("""
             color: #E5E7EB;
         }
 
-        /* --- DETECCIÓN AUTOMÁTICA DE PANTALLA --- */
+        /* --- DETECCIÓN AUTOMÁTICA DE PANTALLA EN STREAMLIT --- */
+        /* En PC (> 768px): Ocultar el contenedor móvil y dar altura a los botones del calendario */
         @media (min-width: 769px) {
-            .solo-celular { display: none !important; }
-            .solo-pc { display: block !important; }
+            div[data-testid="stVerticalBlock"]:has(> div.element-container .marker-movil) {
+                display: none !important;
+            }
+            div[data-testid="stVerticalBlock"]:has(> div.element-container .marker-pc) div[data-testid="column"] button {
+                height: 68px !important;
+                padding: 4px !important;
+                line-height: 1.25 !important;
+                font-size: 0.82rem !important;
+            }
         }
+        /* En Celular (<= 768px): Ocultar por completo el bloque gigante de PC */
         @media (max-width: 768px) {
             .block-container { padding-top: 2.8rem !important; padding-left: 0.6rem !important; padding-right: 0.6rem !important; }
-            .solo-pc { display: none !important; }
-            .solo-celular { display: block !important; }
+            div[data-testid="stVerticalBlock"]:has(> div.element-container .marker-pc) {
+                display: none !important;
+            }
             .ticker-wrap { padding: 7px 0; margin-bottom: 10px; }
             .ticker-item { font-size: 0.84rem; padding: 0 18px; }
-            
-            /* Evitar que Streamlit apile los botones de navegación rápida en celular */
-            .solo-celular div[data-testid="stHorizontalBlock"] {
-                flex-direction: row !important;
-                flex-wrap: nowrap !important;
-                gap: 6px !important;
-            }
-            .solo-celular div[data-testid="column"] {
-                min-width: 0 !important;
-                flex: 1 1 auto !important;
-            }
-            .solo-celular button {
-                height: 42px !important;
-                padding: 2px 6px !important;
-                font-size: 0.85rem !important;
-            }
         }
     </style>
 """, unsafe_allow_html=True)
@@ -504,163 +491,99 @@ def renderizar_terminal():
             resumen_dias[f] = {"nas": tiene_nas, "xau": tiene_xau, "imp": max_imp}
 
     meses_es = ["", "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"]
-    dias_sem_cortos = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
 
     # =========================================================================
-    # --- B1. NAVEGACIÓN DE DÍAS SOLO PARA CELULAR (Compacta, sin lista larga)
+    # --- B1. SELECTOR NATIVO COMPACTO SOLO PARA CELULAR (Abre calendario táctil)
     # =========================================================================
-    st.markdown('<div class="solo-celular">', unsafe_allow_html=True)
-    
-    # Construir opciones del selector desplegable con todos los días del mes actual
-    ultimo_dia_mes = calendar.monthrange(st.session_state.anio_vista, st.session_state.mes_vista)[1]
-    fechas_mes_lista = [date(st.session_state.anio_vista, st.session_state.mes_vista, d) for d in range(1, ultimo_dia_mes + 1)]
-    
-    # Asegurar que fecha_seleccionada esté dentro del mes en vista
-    if st.session_state.fecha_seleccionada not in fechas_mes_lista:
-        st.session_state.fecha_seleccionada = fechas_mes_lista[0]
-
-    def etiqueta_dia_movil(f_obj):
-        info = resumen_dias.get(f_obj, {"nas": False, "xau": False, "imp": -1})
-        imp_d = "🔴" if info["imp"] == 1 else "🟠" if info["imp"] == 0 else "⚪"
-        act_list = []
-        if info["nas"]: act_list.append("NAS")
-        if info["xau"]: act_list.append("XAU")
-        act_str = "/".join(act_list) if act_list else "Sin eventos"
-        hoy_tag = "📍 " if f_obj == hoy_bol else ""
-        nom_d = dias_sem_cortos[f_obj.weekday()]
-        return f"{hoy_tag}{nom_d} {f_obj.day:02d}/{f_obj.month:02d} {imp_d} ({act_str})"
-
-    # Barra de selección rápida en una sola fila: [◀ Día] [Desplegable Día] [Día ▶]
-    mc1, mc2, mc3 = st.columns([1.2, 4.6, 1.2])
-    with mc1:
-        if st.button("◀", key="mob_prev_day", use_container_width=True):
-            nueva_f = st.session_state.fecha_seleccionada - timedelta(days=1)
-            st.session_state.fecha_seleccionada = nueva_f
-            st.session_state.mes_vista = nueva_f.month
-            st.session_state.anio_vista = nueva_f.year
-            st.rerun()
-    with mc2:
-        idx_actual = fechas_mes_lista.index(st.session_state.fecha_seleccionada)
-        f_elegida = st.selectbox(
-            "Seleccionar día:",
-            options=fechas_mes_lista,
-            index=idx_actual,
-            format_func=etiqueta_dia_movil,
-            key="mob_day_select",
-            label_visibility="collapsed"
-        )
-        if f_elegida != st.session_state.fecha_seleccionada:
-            st.session_state.fecha_seleccionada = f_elegida
-            st.rerun()
-    with mc3:
-        if st.button("▶", key="mob_next_day", use_container_width=True):
-            nueva_f = st.session_state.fecha_seleccionada + timedelta(days=1)
-            st.session_state.fecha_seleccionada = nueva_f
-            st.session_state.mes_vista = nueva_f.month
-            st.session_state.anio_vista = nueva_f.year
-            st.rerun()
-
-    # Fila 2 en móvil: [◀ Mes] [📍 Hoy] [🔄 Sync] [Mes ▶]
-    mb1, mb2, mb3, mb4 = st.columns([1.3, 1.7, 1.7, 1.3])
-    with mb1:
-        if st.button("◀ Mes", key="mob_prev_m", use_container_width=True):
-            if st.session_state.mes_vista == 1:
-                st.session_state.mes_vista = 12
-                st.session_state.anio_vista -= 1
-            else:
-                st.session_state.mes_vista -= 1
-            st.session_state.fecha_seleccionada = date(st.session_state.anio_vista, st.session_state.mes_vista, 1)
-            st.rerun()
-    with mb2:
-        if st.button("📍 Hoy", key="mob_hoy", use_container_width=True):
-            st.session_state.fecha_seleccionada = hoy_bol
-            st.session_state.mes_vista = hoy_bol.month
-            st.session_state.anio_vista = hoy_bol.year
-            st.rerun()
-    with mb3:
-        if st.button("🔄 Sync", key="mob_sync", use_container_width=True):
-            st.cache_data.clear()
-            st.rerun()
-    with mb4:
-        if st.button("Mes ▶", key="mob_next_m", use_container_width=True):
-            if st.session_state.mes_vista == 12:
-                st.session_state.mes_vista = 1
-                st.session_state.anio_vista += 1
-            else:
-                st.session_state.mes_vista += 1
-            st.session_state.fecha_seleccionada = date(st.session_state.anio_vista, st.session_state.mes_vista, 1)
-            st.rerun()
-
-    st.markdown('</div>', unsafe_allow_html=True)
+    with st.container():
+        st.markdown('<span class="marker-movil"></span>', unsafe_allow_html=True)
+        col_m_fecha, col_m_btn = st.columns([3, 1])
+        with col_m_fecha:
+            nueva_fecha_mob = st.date_input(
+                "📅 Toca para elegir fecha:",
+                value=st.session_state.fecha_seleccionada,
+                format="DD/MM/YYYY",
+                key="mob_native_date"
+            )
+            if nueva_fecha_mob != st.session_state.fecha_seleccionada:
+                st.session_state.fecha_seleccionada = nueva_fecha_mob
+                st.session_state.mes_vista = nueva_fecha_mob.month
+                st.session_state.anio_vista = nueva_fecha_mob.year
+                st.rerun()
+        with col_m_btn:
+            st.write("") # Alinear verticalmente con el campo de fecha
+            if st.button("🔄 Sync", key="mob_sync_btn", use_container_width=True):
+                st.cache_data.clear()
+                st.rerun()
 
     # =========================================================================
     # --- B2. CALENDARIO MENSUAL COMPLETO SOLO PARA COMPUTADORA (7 Columnas) ---
     # =========================================================================
-    st.markdown('<div class="solo-pc">', unsafe_allow_html=True)
-    c_prev, c_mes, c_next, c_hoy, c_act = st.columns([1, 4, 1, 1.5, 1.5])
-    with c_prev:
-        if st.button("◀ Mes Ant.", key="pc_prev_m", use_container_width=True):
-            if st.session_state.mes_vista == 1:
-                st.session_state.mes_vista = 12
-                st.session_state.anio_vista -= 1
-            else:
-                st.session_state.mes_vista -= 1
-            st.rerun()
-    with c_mes:
-        st.markdown(f"<h2 style='text-align:center; margin:0; color:#EF4444;'>📅 {meses_es[st.session_state.mes_vista]} {st.session_state.anio_vista}</h2>", unsafe_allow_html=True)
-    with c_next:
-        if st.button("Mes Sig. ▶", key="pc_next_m", use_container_width=True):
-            if st.session_state.mes_vista == 12:
-                st.session_state.mes_vista = 1
-                st.session_state.anio_vista += 1
-            else:
-                st.session_state.mes_vista += 1
-            st.rerun()
-    with c_hoy:
-        if st.button("📍 Ir a Hoy", key="pc_hoy", use_container_width=True):
-            st.session_state.fecha_seleccionada = hoy_bol
-            st.session_state.mes_vista = hoy_bol.month
-            st.session_state.anio_vista = hoy_bol.year
-            st.rerun()
-    with c_act:
-        if st.button("🔄 Actualizar", key="pc_sync", use_container_width=True):
-            st.cache_data.clear()
-            st.rerun()
-
-    dias_semana = ["LUN", "MAR", "MIÉ", "JUE", "VIE", "SÁB", "DOM"]
-    cols_header = st.columns(7)
-    for i, nombre_dia in enumerate(dias_semana):
-        clase = "cal-header-wknd" if i >= 5 else "cal-header"
-        cols_header[i].markdown(f"<div class='{clase}'>{nombre_dia}</div>", unsafe_allow_html=True)
-
-    matriz_mes = calendar.monthcalendar(st.session_state.anio_vista, st.session_state.mes_vista)
-    for semana in matriz_mes:
-        cols_sem = st.columns(7)
-        for i, num_dia in enumerate(semana):
-            with cols_sem[i]:
-                if num_dia == 0:
-                    st.write("")
+    with st.container():
+        st.markdown('<span class="marker-pc"></span>', unsafe_allow_html=True)
+        c_prev, c_mes, c_next, c_hoy, c_act = st.columns([1, 4, 1, 1.5, 1.5])
+        with c_prev:
+            if st.button("◀ Mes Ant.", key="pc_prev_m", use_container_width=True):
+                if st.session_state.mes_vista == 1:
+                    st.session_state.mes_vista = 12
+                    st.session_state.anio_vista -= 1
                 else:
-                    fecha_celda = date(st.session_state.anio_vista, st.session_state.mes_vista, num_dia)
-                    info = resumen_dias.get(fecha_celda, {"nas": False, "xau": False, "imp": -1})
-                    marcas = []
-                    if info["nas"]: marcas.append("🇺🇸NAS")
-                    if info["xau"]: marcas.append("🪙XAU")
-                    imp_dot = "🔴" if info["imp"] == 1 else "🟠" if info["imp"] == 0 else ""
-                    linea_activos = " ".join(marcas) if marcas else "Sin eventos"
-                    es_sel = (fecha_celda == st.session_state.fecha_seleccionada)
-                    prefijo_hoy = "📍" if fecha_celda == hoy_bol else ""
-                    etiqueta_boton = f"{prefijo_hoy}{num_dia} {imp_dot}\n{linea_activos}"
-                    tipo_boton = "primary" if es_sel else "secondary"
-                    
-                    if st.button(etiqueta_boton, key=f"pc_dia_{fecha_celda}", type=tipo_boton, use_container_width=True):
-                        st.session_state.fecha_seleccionada = fecha_celda
-                        st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
+                    st.session_state.mes_vista -= 1
+                st.rerun()
+        with c_mes:
+            st.markdown(f"<h2 style='text-align:center; margin:0; color:#EF4444;'>📅 {meses_es[st.session_state.mes_vista]} {st.session_state.anio_vista}</h2>", unsafe_allow_html=True)
+        with c_next:
+            if st.button("Mes Sig. ▶", key="pc_next_m", use_container_width=True):
+                if st.session_state.mes_vista == 12:
+                    st.session_state.mes_vista = 1
+                    st.session_state.anio_vista += 1
+                else:
+                    st.session_state.mes_vista += 1
+                st.rerun()
+        with c_hoy:
+            if st.button("📍 Ir a Hoy", key="pc_hoy", use_container_width=True):
+                st.session_state.fecha_seleccionada = hoy_bol
+                st.session_state.mes_vista = hoy_bol.month
+                st.session_state.anio_vista = hoy_bol.year
+                st.rerun()
+        with c_act:
+            if st.button("🔄 Actualizar", key="pc_sync", use_container_width=True):
+                st.cache_data.clear()
+                st.rerun()
+
+        dias_semana = ["LUN", "MAR", "MIÉ", "JUE", "VIE", "SÁB", "DOM"]
+        cols_header = st.columns(7)
+        for i, nombre_dia in enumerate(dias_semana):
+            clase = "cal-header-wknd" if i >= 5 else "cal-header"
+            cols_header[i].markdown(f"<div class='{clase}'>{nombre_dia}</div>", unsafe_allow_html=True)
+
+        matriz_mes = calendar.monthcalendar(st.session_state.anio_vista, st.session_state.mes_vista)
+        for semana in matriz_mes:
+            cols_sem = st.columns(7)
+            for i, num_dia in enumerate(semana):
+                with cols_sem[i]:
+                    if num_dia == 0:
+                        st.write("")
+                    else:
+                        fecha_celda = date(st.session_state.anio_vista, st.session_state.mes_vista, num_dia)
+                        info = resumen_dias.get(fecha_celda, {"nas": False, "xau": False, "imp": -1})
+                        marcas = []
+                        if info["nas"]: marcas.append("🇺🇸NAS")
+                        if info["xau"]: marcas.append("🪙XAU")
+                        imp_dot = "🔴" if info["imp"] == 1 else "🟠" if info["imp"] == 0 else ""
+                        linea_activos = " ".join(marcas) if marcas else "Sin eventos"
+                        es_sel = (fecha_celda == st.session_state.fecha_seleccionada)
+                        prefijo_hoy = "📍" if fecha_celda == hoy_bol else ""
+                        etiqueta_boton = f"{prefijo_hoy}{num_dia} {imp_dot}\n{linea_activos}"
+                        tipo_boton = "primary" if es_sel else "secondary"
+                        
+                        if st.button(etiqueta_boton, key=f"pc_dia_{fecha_celda}", type=tipo_boton, use_container_width=True):
+                            st.session_state.fecha_seleccionada = fecha_celda
+                            st.rerun()
 
     st.markdown("---")
 
-    # --- D. DETALLE DEL DÍA SELECCIONADO (CON INDICADOR DE MODO FRANCOTIRADOR) ---
+    # --- D. DETALLE DEL DÍA SELECCIONADO ---
     f_sel = st.session_state.fecha_seleccionada
     estado_radar = "⚡ EN VIVO (10s)" if st.session_state.modo_francotirador else "🟢 Normal (3m)"
     
@@ -729,31 +652,31 @@ def renderizar_terminal():
                 })
 
         # 1. BLOQUE SOLO PARA COMPUTADORA
-        st.markdown('<div class="solo-pc">', unsafe_allow_html=True)
-        col_nas, col_xau = st.columns(2, gap="medium")
-        with col_nas:
-            st.markdown("#### 🇺🇸 NAS100 (Índice Nasdaq)")
-            if filas_nas:
-                st.dataframe(pd.DataFrame(filas_nas), use_container_width=True, hide_index=True)
-            else:
-                st.info("Sin eventos programados para NAS100 con los filtros actuales.")
+        with st.container():
+            st.markdown('<span class="marker-pc"></span>', unsafe_allow_html=True)
+            col_nas, col_xau = st.columns(2, gap="medium")
+            with col_nas:
+                st.markdown("#### 🇺🇸 NAS100 (Índice Nasdaq)")
+                if filas_nas:
+                    st.dataframe(pd.DataFrame(filas_nas), use_container_width=True, hide_index=True)
+                else:
+                    st.info("Sin eventos programados para NAS100 con los filtros actuales.")
 
-        with col_xau:
-            st.markdown("#### 🪙 XAUUSD (Oro / Dólar)")
-            if filas_xau:
-                st.dataframe(pd.DataFrame(filas_xau), use_container_width=True, hide_index=True)
-            else:
-                st.info("Sin eventos programados para XAUUSD con los filtros actuales.")
-        st.markdown('</div>', unsafe_allow_html=True)
+            with col_xau:
+                st.markdown("#### 🪙 XAUUSD (Oro / Dólar)")
+                if filas_xau:
+                    st.dataframe(pd.DataFrame(filas_xau), use_container_width=True, hide_index=True)
+                else:
+                    st.info("Sin eventos programados para XAUUSD con los filtros actuales.")
 
         # 2. BLOQUE SOLO PARA CELULAR
-        st.markdown('<div class="solo-celular">', unsafe_allow_html=True)
-        tab_nas, tab_xau = st.tabs([f"🇺🇸 NAS100 ({len(filas_nas_mob)})", f"🪙 XAUUSD ({len(filas_xau_mob)})"])
-        with tab_nas:
-            st.markdown(construir_tarjetas_movil(filas_nas_mob), unsafe_allow_html=True)
-        with tab_xau:
-            st.markdown(construir_tarjetas_movil(filas_xau_mob), unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
+        with st.container():
+            st.markdown('<span class="marker-movil"></span>', unsafe_allow_html=True)
+            tab_nas, tab_xau = st.tabs([f"🇺🇸 NAS100 ({len(filas_nas_mob)})", f"🪙 XAUUSD ({len(filas_xau_mob)})"])
+            with tab_nas:
+                st.markdown(construir_tarjetas_movil(filas_nas_mob), unsafe_allow_html=True)
+            with tab_xau:
+                st.markdown(construir_tarjetas_movil(filas_xau_mob), unsafe_allow_html=True)
 
     else:
         st.warning("No se encontraron datos para el mes seleccionado.")
