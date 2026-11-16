@@ -54,7 +54,7 @@ st.markdown("""
         .badge-xau { background-color: #D97706; color: white; padding: 2px 7px; border-radius: 4px; font-weight: bold; font-size: 0.78rem; }
         .badge-brk { background-color: #DC2626; color: white; padding: 2px 7px; border-radius: 4px; font-weight: bold; font-size: 0.78rem; }
         
-        /* Encabezados de días de la semana en el calendario */
+        /* Encabezados de días de la semana en el calendario PC */
         .cal-header {
             text-align: center;
             font-weight: bold;
@@ -76,7 +76,7 @@ st.markdown("""
             font-size: 0.85rem;
         }
         /* Ajuste de botones del calendario en PC */
-        div[data-testid="column"] button {
+        .solo-pc div[data-testid="column"] button {
             height: 68px !important;
             padding: 4px !important;
             line-height: 1.25 !important;
@@ -130,9 +130,21 @@ st.markdown("""
             .solo-celular { display: block !important; }
             .ticker-wrap { padding: 7px 0; margin-bottom: 10px; }
             .ticker-item { font-size: 0.84rem; padding: 0 18px; }
-            div[data-testid="column"] button {
-                height: 46px !important;
-                font-size: 0.78rem !important;
+            
+            /* Evitar que Streamlit apile los botones de navegación rápida en celular */
+            .solo-celular div[data-testid="stHorizontalBlock"] {
+                flex-direction: row !important;
+                flex-wrap: nowrap !important;
+                gap: 6px !important;
+            }
+            .solo-celular div[data-testid="column"] {
+                min-width: 0 !important;
+                flex: 1 1 auto !important;
+            }
+            .solo-celular button {
+                height: 42px !important;
+                padding: 2px 6px !important;
+                font-size: 0.85rem !important;
             }
         }
     </style>
@@ -179,7 +191,6 @@ def obtener_discursos_ff():
 # 2B. Descarga de datos del calendario económico (Con caché dinámica para Modo Francotirador)
 @st.cache_data(ttl=10)
 def obtener_datos_mes_rapido(anio, mes, bloque_tiempo):
-    # bloque_tiempo controla cada cuántos segundos se invalida la caché real
     primer_dia = date(anio, mes, 1)
     ultimo_dia_num = calendar.monthrange(anio, mes)[1]
     ultimo_dia = date(anio, mes, ultimo_dia_num)
@@ -406,37 +417,29 @@ if 'anio_vista' not in st.session_state:
 if 'modo_francotirador' not in st.session_state:
     st.session_state.modo_francotirador = False
 
-# Evaluar si estamos cerca de una noticia para ajustar la frecuencia de refresco
 def calcular_intervalo_refresco(df_hoy, ahora):
     if df_hoy.empty:
         return 180, False
-    
-    # Buscar noticias de hoy que aún no tengan dato real (actual is NaN) o que ocurrieron hace menos de 5 min
     for _, r in df_hoy.iterrows():
         fecha_ev = r['date']
         diff_segundos = (fecha_ev - ahora).total_seconds()
         tiene_real = pd.notna(r.get('actual')) and r.get('actual') is not None
         es_discurso = r.get('es_discurso', False)
-        
-        # Si faltan menos de 2 min (-120s) para que salga la noticia, o pasaron hasta 5 min (+300s) y aún no sale el dato
         if not es_discurso and not tiene_real and (-300 <= diff_segundos <= 120):
-            return 10, True # Activar Modo Francotirador cada 10 segundos
-            
-    return 180, False # Modo Normal cada 3 minutos
+            return 10, True
+    return 180, False
 
 # 7. Panel Principal con Refresco Inteligente (10s en noticia / 3m normal)
 @st.fragment(run_every=10)
 def renderizar_terminal():
     ahora = datetime.now(tz_bolivia)
     
-    # Definir bloque de caché: cada 10s en modo francotirador, o cada 180s en modo normal
     divisor_cache = 10 if st.session_state.modo_francotirador else 180
     bloque_tiempo = int(ahora.timestamp() // divisor_cache)
     
     df_mes = obtener_datos_mes_rapido(st.session_state.anio_vista, st.session_state.mes_vista, bloque_tiempo)
     df_actual = obtener_datos_mes_rapido(hoy_bol.year, hoy_bol.month, bloque_tiempo)
     
-    # Evaluar si debemos activar/desactivar el Modo Francotirador para el siguiente ciclo
     if not df_actual.empty:
         df_hoy_solo = df_actual[df_actual['date'].dt.date == hoy_bol]
         _, activar_sniper = calcular_intervalo_refresco(df_hoy_solo, ahora)
@@ -444,21 +447,10 @@ def renderizar_terminal():
     else:
         st.session_state.modo_francotirador = False
 
-    # Si NO estamos en modo francotirador, solo redibujar la interfaz cada 3 minutos (180s) para no interrumpir clics
-    if not st.session_state.modo_francotirador:
-        if 'ultimo_render_normal' not in st.session_state:
-            st.session_state.ultimo_render_normal = ahora
-        elif (ahora - st.session_state.ultimo_render_normal).total_seconds() < 175 and 'ya_renderizo' in st.session_state:
-            # Si el usuario hizo clic manualmente (ej. cambió de día), sí dejamos pasar el renderizado
-            pass
-        st.session_state.ultimo_render_normal = ahora
-    st.session_state.ya_renderizo = True
-
     breaking_news = obtener_breaking_news(FINNHUB_API_KEY)
     
     # --- A. CINTA HORIZONTAL (PRÓXIMAS DEL CALENDARIO + BREAKING NEWS EN VIVO) ---
     items_ticker = []
-    
     for bn in breaking_news[:5]:
         if bn['fecha_dt'] >= (ahora - timedelta(hours=6)):
             badges = '<span class="badge-brk">🚨 ÚLTIMA HORA</span> '
@@ -498,12 +490,116 @@ def renderizar_terminal():
     else:
         st.markdown('<div class="ticker-wrap"><div class="ticker-move"><div class="ticker-item">📡 Monitoreando mercados en vivo... Sin eventos próximos.</div></div></div>', unsafe_allow_html=True)
 
-    # --- B. ENCABEZADO Y NAVEGACIÓN DEL CALENDARIO ---
+    # Pre-calcular qué activos tienen noticias cada día del mes
+    resumen_dias = {}
+    if not df_mes.empty:
+        df_mes['fecha_corta'] = df_mes['date'].dt.date
+        for f, grupo in df_mes.groupby('fecha_corta'):
+            filas_nas_dia = [r for _, r in grupo.iterrows() if es_relevante_nas100(r, False)]
+            filas_xau_dia = [r for _, r in grupo.iterrows() if es_relevante_xauusd(r, False)]
+            tiene_nas = len(filas_nas_dia) > 0
+            tiene_xau = len(filas_xau_dia) > 0
+            imp_relevantes = [r.get('importance', -1) for r in (filas_nas_dia + filas_xau_dia) if pd.notna(r.get('importance'))]
+            max_imp = max(imp_relevantes) if imp_relevantes else -1
+            resumen_dias[f] = {"nas": tiene_nas, "xau": tiene_xau, "imp": max_imp}
+
     meses_es = ["", "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"]
+    dias_sem_cortos = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
+
+    # =========================================================================
+    # --- B1. NAVEGACIÓN DE DÍAS SOLO PARA CELULAR (Compacta, sin lista larga)
+    # =========================================================================
+    st.markdown('<div class="solo-celular">', unsafe_allow_html=True)
     
+    # Construir opciones del selector desplegable con todos los días del mes actual
+    ultimo_dia_mes = calendar.monthrange(st.session_state.anio_vista, st.session_state.mes_vista)[1]
+    fechas_mes_lista = [date(st.session_state.anio_vista, st.session_state.mes_vista, d) for d in range(1, ultimo_dia_mes + 1)]
+    
+    # Asegurar que fecha_seleccionada esté dentro del mes en vista
+    if st.session_state.fecha_seleccionada not in fechas_mes_lista:
+        st.session_state.fecha_seleccionada = fechas_mes_lista[0]
+
+    def etiqueta_dia_movil(f_obj):
+        info = resumen_dias.get(f_obj, {"nas": False, "xau": False, "imp": -1})
+        imp_d = "🔴" if info["imp"] == 1 else "🟠" if info["imp"] == 0 else "⚪"
+        act_list = []
+        if info["nas"]: act_list.append("NAS")
+        if info["xau"]: act_list.append("XAU")
+        act_str = "/".join(act_list) if act_list else "Sin eventos"
+        hoy_tag = "📍 " if f_obj == hoy_bol else ""
+        nom_d = dias_sem_cortos[f_obj.weekday()]
+        return f"{hoy_tag}{nom_d} {f_obj.day:02d}/{f_obj.month:02d} {imp_d} ({act_str})"
+
+    # Barra de selección rápida en una sola fila: [◀ Día] [Desplegable Día] [Día ▶]
+    mc1, mc2, mc3 = st.columns([1.2, 4.6, 1.2])
+    with mc1:
+        if st.button("◀", key="mob_prev_day", use_container_width=True):
+            nueva_f = st.session_state.fecha_seleccionada - timedelta(days=1)
+            st.session_state.fecha_seleccionada = nueva_f
+            st.session_state.mes_vista = nueva_f.month
+            st.session_state.anio_vista = nueva_f.year
+            st.rerun()
+    with mc2:
+        idx_actual = fechas_mes_lista.index(st.session_state.fecha_seleccionada)
+        f_elegida = st.selectbox(
+            "Seleccionar día:",
+            options=fechas_mes_lista,
+            index=idx_actual,
+            format_func=etiqueta_dia_movil,
+            key="mob_day_select",
+            label_visibility="collapsed"
+        )
+        if f_elegida != st.session_state.fecha_seleccionada:
+            st.session_state.fecha_seleccionada = f_elegida
+            st.rerun()
+    with mc3:
+        if st.button("▶", key="mob_next_day", use_container_width=True):
+            nueva_f = st.session_state.fecha_seleccionada + timedelta(days=1)
+            st.session_state.fecha_seleccionada = nueva_f
+            st.session_state.mes_vista = nueva_f.month
+            st.session_state.anio_vista = nueva_f.year
+            st.rerun()
+
+    # Fila 2 en móvil: [◀ Mes] [📍 Hoy] [🔄 Sync] [Mes ▶]
+    mb1, mb2, mb3, mb4 = st.columns([1.3, 1.7, 1.7, 1.3])
+    with mb1:
+        if st.button("◀ Mes", key="mob_prev_m", use_container_width=True):
+            if st.session_state.mes_vista == 1:
+                st.session_state.mes_vista = 12
+                st.session_state.anio_vista -= 1
+            else:
+                st.session_state.mes_vista -= 1
+            st.session_state.fecha_seleccionada = date(st.session_state.anio_vista, st.session_state.mes_vista, 1)
+            st.rerun()
+    with mb2:
+        if st.button("📍 Hoy", key="mob_hoy", use_container_width=True):
+            st.session_state.fecha_seleccionada = hoy_bol
+            st.session_state.mes_vista = hoy_bol.month
+            st.session_state.anio_vista = hoy_bol.year
+            st.rerun()
+    with mb3:
+        if st.button("🔄 Sync", key="mob_sync", use_container_width=True):
+            st.cache_data.clear()
+            st.rerun()
+    with mb4:
+        if st.button("Mes ▶", key="mob_next_m", use_container_width=True):
+            if st.session_state.mes_vista == 12:
+                st.session_state.mes_vista = 1
+                st.session_state.anio_vista += 1
+            else:
+                st.session_state.mes_vista += 1
+            st.session_state.fecha_seleccionada = date(st.session_state.anio_vista, st.session_state.mes_vista, 1)
+            st.rerun()
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # =========================================================================
+    # --- B2. CALENDARIO MENSUAL COMPLETO SOLO PARA COMPUTADORA (7 Columnas) ---
+    # =========================================================================
+    st.markdown('<div class="solo-pc">', unsafe_allow_html=True)
     c_prev, c_mes, c_next, c_hoy, c_act = st.columns([1, 4, 1, 1.5, 1.5])
     with c_prev:
-        if st.button("◀ Mes Ant.", use_container_width=True):
+        if st.button("◀ Mes Ant.", key="pc_prev_m", use_container_width=True):
             if st.session_state.mes_vista == 1:
                 st.session_state.mes_vista = 12
                 st.session_state.anio_vista -= 1
@@ -513,7 +609,7 @@ def renderizar_terminal():
     with c_mes:
         st.markdown(f"<h2 style='text-align:center; margin:0; color:#EF4444;'>📅 {meses_es[st.session_state.mes_vista]} {st.session_state.anio_vista}</h2>", unsafe_allow_html=True)
     with c_next:
-        if st.button("Mes Sig. ▶", use_container_width=True):
+        if st.button("Mes Sig. ▶", key="pc_next_m", use_container_width=True):
             if st.session_state.mes_vista == 12:
                 st.session_state.mes_vista = 1
                 st.session_state.anio_vista += 1
@@ -521,32 +617,16 @@ def renderizar_terminal():
                 st.session_state.mes_vista += 1
             st.rerun()
     with c_hoy:
-        if st.button("📍 Ir a Hoy", use_container_width=True):
+        if st.button("📍 Ir a Hoy", key="pc_hoy", use_container_width=True):
             st.session_state.fecha_seleccionada = hoy_bol
             st.session_state.mes_vista = hoy_bol.month
             st.session_state.anio_vista = hoy_bol.year
             st.rerun()
     with c_act:
-        if st.button("🔄 Actualizar", use_container_width=True):
+        if st.button("🔄 Actualizar", key="pc_sync", use_container_width=True):
             st.cache_data.clear()
             st.rerun()
 
-    # Pre-calcular qué activos tienen noticias cada día del mes
-    resumen_dias = {}
-    if not df_mes.empty:
-        df_mes['fecha_corta'] = df_mes['date'].dt.date
-        for f, grupo in df_mes.groupby('fecha_corta'):
-            filas_nas_dia = [r for _, r in grupo.iterrows() if es_relevante_nas100(r, False)]
-            filas_xau_dia = [r for _, r in grupo.iterrows() if es_relevante_xauusd(r, False)]
-            
-            tiene_nas = len(filas_nas_dia) > 0
-            tiene_xau = len(filas_xau_dia) > 0
-            
-            imp_relevantes = [r.get('importance', -1) for r in (filas_nas_dia + filas_xau_dia) if pd.notna(r.get('importance'))]
-            max_imp = max(imp_relevantes) if imp_relevantes else -1
-            resumen_dias[f] = {"nas": tiene_nas, "xau": tiene_xau, "imp": max_imp}
-
-    # --- C. CUADRÍCULA DEL CALENDARIO MENSUAL ---
     dias_semana = ["LUN", "MAR", "MIÉ", "JUE", "VIE", "SÁB", "DOM"]
     cols_header = st.columns(7)
     for i, nombre_dia in enumerate(dias_semana):
@@ -554,7 +634,6 @@ def renderizar_terminal():
         cols_header[i].markdown(f"<div class='{clase}'>{nombre_dia}</div>", unsafe_allow_html=True)
 
     matriz_mes = calendar.monthcalendar(st.session_state.anio_vista, st.session_state.mes_vista)
-    
     for semana in matriz_mes:
         cols_sem = st.columns(7)
         for i, num_dia in enumerate(semana):
@@ -564,35 +643,31 @@ def renderizar_terminal():
                 else:
                     fecha_celda = date(st.session_state.anio_vista, st.session_state.mes_vista, num_dia)
                     info = resumen_dias.get(fecha_celda, {"nas": False, "xau": False, "imp": -1})
-                    
                     marcas = []
                     if info["nas"]: marcas.append("🇺🇸NAS")
                     if info["xau"]: marcas.append("🪙XAU")
-                    
                     imp_dot = "🔴" if info["imp"] == 1 else "🟠" if info["imp"] == 0 else ""
                     linea_activos = " ".join(marcas) if marcas else "Sin eventos"
-                    
                     es_sel = (fecha_celda == st.session_state.fecha_seleccionada)
                     prefijo_hoy = "📍" if fecha_celda == hoy_bol else ""
-                    
                     etiqueta_boton = f"{prefijo_hoy}{num_dia} {imp_dot}\n{linea_activos}"
                     tipo_boton = "primary" if es_sel else "secondary"
                     
-                    if st.button(etiqueta_boton, key=f"dia_{fecha_celda}", type=tipo_boton, use_container_width=True):
+                    if st.button(etiqueta_boton, key=f"pc_dia_{fecha_celda}", type=tipo_boton, use_container_width=True):
                         st.session_state.fecha_seleccionada = fecha_celda
                         st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown("---")
 
     # --- D. DETALLE DEL DÍA SELECCIONADO (CON INDICADOR DE MODO FRANCOTIRADOR) ---
     f_sel = st.session_state.fecha_seleccionada
-    estado_radar = "⚡ MODO FRANCOTIRADOR EN VIVO (10s)" if st.session_state.modo_francotirador else "🟢 Radar Normal (3m)"
+    estado_radar = "⚡ EN VIVO (10s)" if st.session_state.modo_francotirador else "🟢 Normal (3m)"
     
     c_tit_dia, c_check_ruido, c_filtro_imp = st.columns([4.8, 2.3, 2.4])
     with c_tit_dia:
         st.subheader(f"📋 {f_sel.strftime('%d/%m/%Y')} | `{ahora.strftime('%H:%M:%S')}` • {estado_radar}")
     with c_check_ruido:
-        st.write("")
         filtro_estricto = st.checkbox("🛡️ Ocultar subastas 3M/6M y agrícolas", value=False)
     with c_filtro_imp:
         filtro_imp = st.multiselect(
