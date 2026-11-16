@@ -15,7 +15,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# 2. Descarga de datos (4 días atrás hasta 4 días adelante)
+# 2. Descarga de datos (EE.UU. para ambos, más China y Eurozona para el Oro)
 @st.cache_data(ttl=180)
 def obtener_datos():
     tz_bolivia = pytz.timezone('America/La_Paz')
@@ -28,7 +28,7 @@ def obtener_datos():
     params = {
         "from": inicio,
         "to": fin,
-        "countries": "US"
+        "countries": "US,CN,EU"
     }
     headers = {
         "Origin": "https://www.tradingview.com",
@@ -49,39 +49,98 @@ def obtener_datos():
         st.error(f"Error de conexión: {e}")
         return pd.DataFrame()
 
-# 3. Lógica inteligente: Resultado Real + Expectativa Futura
-def obtener_sesgo_compacto(actual, pronostico, anterior, activo):
-    # CASO A: La noticia aún no sale (Pendiente) -> Evaluamos Pronóstico vs. Anterior
-    if pd.isna(actual) or actual is None:
-        if pd.notna(pronostico) and pronostico is not None and pd.notna(anterior) and anterior is not None:
-            try:
-                pron = float(pronostico)
-                ant = float(anterior)
-                if pron > ant:
-                    return "⏳ Pendiente (Se espera Caída 📉)"
-                elif pron < ant:
-                    return "⏳ Pendiente (Se espera Subida 📈)"
-                else:
-                    return "⏳ Pendiente (Se espera Neutral ➖)"
-            except:
-                return "⏳ Pendiente"
-        return "⏳ Pendiente (Sin pronóstico)"
+# 3. Filtros Inteligentes por Activo
+def es_relevante_nas100(fila):
+    if fila.get('country') != 'US':
+        return False
     
-    # CASO B: La noticia ya salió -> Evaluamos Real vs. Pronóstico (o Anterior)
-    referencia = pronostico if (pd.notna(pronostico) and pronostico is not None) else anterior
+    titulo = str(fila.get('title', '')).lower()
+    ruido_nas = [
+        'nopa', 'soybean', 'soja', 'wheat', 'trigo', 'corn', 'maíz', 'cattle', 'ganado',
+        'crude', 'petróleo', 'oil', 'gasoline', 'gasolina', 'natural gas', 'gas natural',
+        'baker hughes', 'rig count', 'distillate', 'cushing', 'eia', 'api weekly'
+    ]
+    return not any(palabra in titulo for palabra in ruido_nas)
+
+def es_relevante_xauusd(fila):
+    pais = fila.get('country')
+    imp = fila.get('importance', -1)
+    titulo = str(fila.get('title', '')).lower()
+    
+    if pais in ['CN', 'EU']:
+        return imp == 1
+        
+    if pais == 'US':
+        ruido_agricola = [
+            'nopa', 'soybean', 'soja', 'wheat', 'trigo', 'corn', 'maíz', 'cattle', 'ganado', 'cotton', 'algodón'
+        ]
+        return not any(palabra in titulo for palabra in ruido_agricola)
+        
+    return False
+
+# 4. Lógica de Proyección + Auditoría de Cumplimiento
+def obtener_sesgo_compacto(actual, pronostico, anterior, activo, pais):
+    es_extranjera = (pais in ['CN', 'EU'])
+    tiene_actual = pd.notna(actual) and actual is not None
+    tiene_pron = pd.notna(pronostico) and pronostico is not None
+    tiene_ant = pd.notna(anterior) and anterior is not None
+
+    # Evaluar dirección esperada (Pronóstico vs Anterior)
+    dir_esperada = None # 1 = Subida precio, -1 = Caída precio, 0 = Neutral
+    if tiene_pron and tiene_ant:
+        try:
+            p, a = float(pronostico), float(anterior)
+            if p > a:
+                dir_esperada = 1 if es_extranjera else -1
+            elif p < a:
+                dir_esperada = -1 if es_extranjera else 1
+            else:
+                dir_esperada = 0
+        except:
+            pass
+
+    # CASO A: Noticia aún NO sale (Pendiente)
+    if not tiene_actual:
+        if dir_esperada == 1:
+            return "⏳ Pendiente (Se espera Subida 📈)"
+        elif dir_esperada == -1:
+            return "⏳ Pendiente (Se espera Caída 📉)"
+        elif dir_esperada == 0:
+            return "⏳ Pendiente (Se espera Neutral ➖)"
+        return "⏳ Pendiente (Sin pronóstico)"
+
+    # CASO B: Noticia YA salió -> Evaluar impacto real y comparar con lo que se esperaba
+    referencia = pronostico if tiene_pron else anterior
     if pd.isna(referencia) or referencia is None:
         return "ℹ️ Publicado"
-    
+
     try:
         act = float(actual)
         ref = float(referencia)
         
+        # Determinar dirección real respecto a la referencia
         if act > ref:
-            return "🔴 BAJISTA (USD Fuerte)" if activo == "XAU" else "🔴 BAJISTA (Temor Tasas)"
+            dir_real = 1 if es_extranjera else -1
+            etiqueta_base = "🟢 ALCISTA" if es_extranjera else "🔴 BAJISTA"
         elif act < ref:
-            return "🟢 ALCISTA (USD Débil)" if activo == "XAU" else "🟢 ALCISTA (Alivio Tasas)"
+            dir_real = -1 if es_extranjera else 1
+            etiqueta_base = "🔴 BAJISTA" if es_extranjera else "🟢 ALCISTA"
         else:
-            return "⚪ NEUTRAL (Sin cambios)"
+            dir_real = 0
+            etiqueta_base = "⚪ NEUTRAL"
+
+        # Verificar si se cumplió el pronóstico previo
+        if tiene_pron and dir_esperada is not None:
+            if act == float(pronostico):
+                estado = "🎯 Exacto al pronóstico"
+            elif dir_real == dir_esperada:
+                estado = "✅ Cumplido"
+            else:
+                estado = "❌ Al contrario"
+            return f"{etiqueta_base} | {estado}"
+        else:
+            return f"{etiqueta_base} (Vs. Anterior)"
+
     except:
         return "ℹ️ Publicado"
 
@@ -91,16 +150,16 @@ def formatear_num(val, unidad):
         return f"{val}{u}"
     return "-"
 
-# 4. Encabezado Ultra-Compacto
+# 5. Encabezado Ultra-Compacto
 col_t, col_b = st.columns([8, 1])
 with col_t:
-    st.title("📊 Terminal Macro: NAS100 & XAUUSD (3 Días Operables)")
+    st.title("📊 Terminal Macro Filtrada: NAS100 & XAUUSD")
 with col_b:
     if st.button("🔄 Actualizar", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
 
-# 5. Panel Auto-Actualizable cada 3 minutos (180 seg)
+# 6. Panel Auto-Actualizable cada 3 minutos
 @st.fragment(run_every=180)
 def mostrar_dashboard_compacto():
     tz_bolivia = pytz.timezone('America/La_Paz')
@@ -108,12 +167,10 @@ def mostrar_dashboard_compacto():
     hoy = ahora.date()
     dia_semana = hoy.weekday()
     
-    # Día anterior operable
     if dia_semana == 0:   ayer_op = hoy - timedelta(days=3)
     elif dia_semana == 6: ayer_op = hoy - timedelta(days=2)
     else:                 ayer_op = hoy - timedelta(days=1)
         
-    # Siguiente día operable
     if dia_semana == 4:   manana_op = hoy + timedelta(days=3)
     elif dia_semana == 5: manana_op = hoy + timedelta(days=2)
     else:                 manana_op = hoy + timedelta(days=1)
@@ -124,7 +181,6 @@ def mostrar_dashboard_compacto():
         df['fecha_corta'] = df['date'].dt.date
         df_filtrado = df[df['fecha_corta'].isin([ayer_op, hoy, manana_op])].copy()
 
-        # Barra de controles en una sola línea
         c_filtros, c_dias, c_reloj = st.columns([3, 4, 2])
         with c_filtros:
             filtro_imp = st.multiselect(
@@ -169,34 +225,37 @@ def mostrar_dashboard_compacto():
                 ant = formatear_num(row.get('previous'), row.get('unit'))
                 pron = formatear_num(row.get('forecast'), row.get('unit'))
                 act = formatear_num(row.get('actual'), row.get('unit'))
+                pais = row.get('country', 'US')
                 
-                sesgo_nas = obtener_sesgo_compacto(row.get('actual'), row.get('forecast'), row.get('previous'), "NAS")
-                sesgo_xau = obtener_sesgo_compacto(row.get('actual'), row.get('forecast'), row.get('previous'), "XAU")
+                if es_relevante_nas100(row):
+                    sesgo_nas = obtener_sesgo_compacto(row.get('actual'), row.get('forecast'), row.get('previous'), "NAS", pais)
+                    filas_nas.append({
+                        "Imp": row['Imp'],
+                        "Fecha/Hora": fecha_hora,
+                        "Noticia (Solo Tech/Tasas)": row['title'],
+                        "Ant": ant,
+                        "Pron": pron,
+                        "Real": act,
+                        "Proyección y Resultado": sesgo_nas
+                    })
 
-                filas_nas.append({
-                    "Imp": row['Imp'],
-                    "Fecha/Hora": fecha_hora,
-                    "Noticia (USD)": row['title'],
-                    "Ant": ant,
-                    "Pron": pron,
-                    "Real": act,
-                    "Proyección NAS100": sesgo_nas
-                })
-
-                filas_xau.append({
-                    "Imp": row['Imp'],
-                    "Fecha/Hora": fecha_hora,
-                    "Noticia (USD)": row['title'],
-                    "Ant": ant,
-                    "Pron": pron,
-                    "Real": act,
-                    "Proyección XAUUSD": sesgo_xau
-                })
+                if es_relevante_xauusd(row):
+                    bandera = "🇺🇸" if pais == "US" else "🇨🇳" if pais == "CN" else "🇪🇺"
+                    sesgo_xau = obtener_sesgo_compacto(row.get('actual'), row.get('forecast'), row.get('previous'), "XAU", pais)
+                    filas_xau.append({
+                        "Imp": row['Imp'],
+                        "Fecha/Hora": fecha_hora,
+                        "Noticia (Macro/Oro)": f"{bandera} {row['title']}",
+                        "Ant": ant,
+                        "Pron": pron,
+                        "Real": act,
+                        "Proyección y Resultado": sesgo_xau
+                    })
 
             col_nas, col_xau = st.columns(2, gap="medium")
 
             with col_nas:
-                st.subheader("🇺🇸 NAS100 (Índice Nasdaq)")
+                st.subheader("🇺🇸 NAS100 (Filtro Tecnológico/Tasas)")
                 st.dataframe(
                     pd.DataFrame(filas_nas),
                     use_container_width=True,
@@ -205,7 +264,7 @@ def mostrar_dashboard_compacto():
                 )
 
             with col_xau:
-                st.subheader("🪙 XAUUSD (Oro / Dólar)")
+                st.subheader("🪙 XAUUSD (Filtro Macro/Refugio/Energía)")
                 st.dataframe(
                     pd.DataFrame(filas_xau),
                     use_container_width=True,
