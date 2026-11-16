@@ -4,6 +4,7 @@ import requests
 from datetime import datetime, timedelta, date
 import calendar
 import pytz
+import html
 
 # 1. Configuración de pantalla completa y compacta
 st.set_page_config(page_title="Terminal Macro & Breaking News: NAS100 & XAUUSD", layout="wide", initial_sidebar_state="collapsed")
@@ -11,7 +12,7 @@ st.set_page_config(page_title="Terminal Macro & Breaking News: NAS100 & XAUUSD",
 # API Key gratuita de Finnhub (para titulares de noticias en tiempo real)
 FINNHUB_API_KEY = "dbtk2ehr01qtr41fbk30dbtk2ehr01qtr41fbk3g"
 
-# Estilos CSS para el calendario, tarjetas compactas y cinta de noticiero (Ticker)
+# Estilos CSS Responsivos (Detección automática PC vs Celular)
 st.markdown("""
     <style>
         .block-container { padding-top: 3.3rem !important; padding-bottom: 1rem; }
@@ -74,12 +75,65 @@ st.markdown("""
             margin-bottom: 4px;
             font-size: 0.85rem;
         }
-        /* Ajuste de botones del calendario para que parezcan celdas */
+        /* Ajuste de botones del calendario en PC */
         div[data-testid="column"] button {
             height: 68px !important;
             padding: 4px !important;
             line-height: 1.25 !important;
             font-size: 0.82rem !important;
+        }
+
+        /* Tarjetas móviles limpias (2 líneas, sin scroll horizontal) */
+        .mob-card {
+            background-color: #111827;
+            border: 1px solid #374151;
+            border-left: 4px solid #3B82F6;
+            border-radius: 8px;
+            padding: 10px 12px;
+            margin-bottom: 8px;
+        }
+        .mob-card-high { border-left-color: #EF4444; }
+        .mob-card-med  { border-left-color: #F59E0B; }
+        .mob-card-low  { border-left-color: #10B981; }
+        .mob-top {
+            font-size: 0.92rem;
+            font-weight: 600;
+            color: #F9FAFB;
+            margin-bottom: 5px;
+            line-height: 1.3;
+        }
+        .mob-nums {
+            font-size: 0.80rem;
+            color: #9CA3AF;
+            margin-bottom: 5px;
+        }
+        .mob-nums code {
+            color: #E5E7EB;
+            background-color: #1F2937;
+            padding: 1px 5px;
+            border-radius: 4px;
+        }
+        .mob-proy {
+            font-size: 0.84rem;
+            font-weight: bold;
+            color: #E5E7EB;
+        }
+
+        /* --- DETECCIÓN AUTOMÁTICA DE PANTALLA --- */
+        @media (min-width: 769px) {
+            .solo-celular { display: none !important; }
+            .solo-pc { display: block !important; }
+        }
+        @media (max-width: 768px) {
+            .block-container { padding-top: 2.8rem !important; padding-left: 0.6rem !important; padding-right: 0.6rem !important; }
+            .solo-pc { display: none !important; }
+            .solo-celular { display: block !important; }
+            .ticker-wrap { padding: 7px 0; margin-bottom: 10px; }
+            .ticker-item { font-size: 0.84rem; padding: 0 18px; }
+            div[data-testid="column"] button {
+                height: 46px !important;
+                font-size: 0.78rem !important;
+            }
         }
     </style>
 """, unsafe_allow_html=True)
@@ -103,7 +157,6 @@ def obtener_discursos_ff():
                     continue
                 
                 titulo = ev.get("title", "")
-                # Capturar discursos de la Fed/FOMC/Bancos Centrales y eventos que no tienen pronóstico numérico
                 es_discurso = any(k in titulo.lower() for k in ["speaks", "speech", "testifies", "statement", "press conference", "minutes", "fed chair", "fomc"])
                 
                 if es_discurso or (not ev.get("forecast") and not ev.get("previous")):
@@ -123,9 +176,10 @@ def obtener_discursos_ff():
         pass
     return pd.DataFrame(eventos_ff)
 
-# 2B. Descarga de datos del calendario económico (TradingView + Fusión con Forex Factory)
-@st.cache_data(ttl=180)
-def obtener_datos_mes(anio, mes):
+# 2B. Descarga de datos del calendario económico (Con caché dinámica para Modo Francotirador)
+@st.cache_data(ttl=10)
+def obtener_datos_mes_rapido(anio, mes, bloque_tiempo):
+    # bloque_tiempo controla cada cuántos segundos se invalida la caché real
     primer_dia = date(anio, mes, 1)
     ultimo_dia_num = calendar.monthrange(anio, mes)[1]
     ultimo_dia = date(anio, mes, ultimo_dia_num)
@@ -156,16 +210,13 @@ def obtener_datos_mes(anio, mes):
     except Exception:
         pass
 
-    # Fusionar con los discursos de Forex Factory para que no falte ninguno (ej. Fed Chair Warsh, Williams, Barr, Hammack)
     df_ff = obtener_discursos_ff()
     if not df_ff.empty:
-        # Filtrar los eventos de FF que caen dentro del mes consultado
         df_ff_mes = df_ff[(df_ff['date'].dt.year == anio) & (df_ff['date'].dt.month == mes)].copy()
         if not df_ff_mes.empty:
             if df_tv.empty:
                 df_tv = df_ff_mes
             else:
-                # Evitar duplicados exactos por hora y palabras clave
                 titulos_tv = set(df_tv['title'].str.lower().str.replace('🎙️ ', '', regex=False).str[:18])
                 nuevos_ff = df_ff_mes[~df_ff_mes['title'].str.lower().str.replace('🎙️ ', '', regex=False).str[:18].isin(titulos_tv)]
                 df_tv = pd.concat([df_tv, nuevos_ff], ignore_index=True)
@@ -173,13 +224,12 @@ def obtener_datos_mes(anio, mes):
     return df_tv
 
 # 3. Descarga de Noticias Imprevistas / Breaking News (Finnhub Free Endpoint)
-@st.cache_data(ttl=180)
+@st.cache_data(ttl=120)
 def obtener_breaking_news(api_key):
     url = f"https://finnhub.io/api/v1/news?category=general&token={api_key}"
     tz_bolivia = pytz.timezone('America/La_Paz')
     
     excluir = ['bitcoin', 'btc', 'crypto', 'ethereum', 'solana', 'dogecoin', 'memecoin', 'nft']
-    
     kw_xau = ['gold', 'xau', 'bullion', 'fed', 'powell', 'warsh', 'fomc', 'inflation', 'cpi', 'tariff', 'war', 'missile', 'iran', 'israel', 'china', 'central bank', 'treasury', 'yield', 'dollar', 'dxy', 'recession']
     kw_nas = ['nasdaq', 'tech', 'nvidia', 'apple', 'microsoft', 'semiconductor', 'fed', 'powell', 'warsh', 'fomc', 'interest rate', 'inflation', 'cpi', 'jobs', 'recession', 'treasury', 'yield', 'tariff']
     
@@ -260,7 +310,6 @@ def obtener_sesgo_compacto(fila, activo, ahora_bol):
     es_discurso = fila.get('es_discurso', False)
     fecha_ev = fila.get('date')
 
-    # Manejo especial para Discursos de la Reserva Federal / FOMC (no tienen cifras numéricas)
     if es_discurso and (pd.isna(actual) or actual is None):
         if pd.notna(fecha_ev) and fecha_ev <= ahora_bol:
             return "🎙️ Discurso realizado (Revisar tono Hawkish/Dovish)"
@@ -323,7 +372,27 @@ def formatear_num(val, unidad):
         return f"{val}{u}"
     return "-"
 
-# 6. Estado de sesión para el día y mes seleccionado
+# Función para generar tarjetas HTML móviles limpias
+def construir_tarjetas_movil(filas_lista):
+    if not filas_lista:
+        return "<p style='color:#9CA3AF; font-size:0.9rem;'>Sin eventos programados para esta fecha.</p>"
+    html_cards = []
+    for f in filas_lista:
+        imp_ico = f["Imp"]
+        clase_borde = "mob-card-high" if imp_ico == "🔴" else "mob-card-med" if imp_ico == "🟠" else "mob-card-low"
+        titulo_limpio = html.escape(str(f["Noticia"]))
+        proy_limpia = html.escape(str(f["Proy"]))
+        card = f"""
+        <div class="mob-card {clase_borde}">
+            <div class="mob-top">{imp_ico} <b>{f['Hora']}</b> — {titulo_limpio}</div>
+            <div class="mob-nums">Ant: <code>{f['Ant']}</code> &nbsp;|&nbsp; Pron: <code>{f['Pron']}</code> &nbsp;|&nbsp; Real: <code>{f['Real']}</code></div>
+            <div class="mob-proy">{proy_limpia}</div>
+        </div>
+        """
+        html_cards.append(card)
+    return "".join(html_cards)
+
+# 6. Estado de sesión para el día, mes y Modo Francotirador
 tz_bolivia = pytz.timezone('America/La_Paz')
 ahora_bol = datetime.now(tz_bolivia)
 hoy_bol = ahora_bol.date()
@@ -334,16 +403,60 @@ if 'mes_vista' not in st.session_state:
     st.session_state.mes_vista = hoy_bol.month
 if 'anio_vista' not in st.session_state:
     st.session_state.anio_vista = hoy_bol.year
+if 'modo_francotirador' not in st.session_state:
+    st.session_state.modo_francotirador = False
 
-# 7. Panel Principal Auto-Actualizable cada 3 minutos
-@st.fragment(run_every=180)
+# Evaluar si estamos cerca de una noticia para ajustar la frecuencia de refresco
+def calcular_intervalo_refresco(df_hoy, ahora):
+    if df_hoy.empty:
+        return 180, False
+    
+    # Buscar noticias de hoy que aún no tengan dato real (actual is NaN) o que ocurrieron hace menos de 5 min
+    for _, r in df_hoy.iterrows():
+        fecha_ev = r['date']
+        diff_segundos = (fecha_ev - ahora).total_seconds()
+        tiene_real = pd.notna(r.get('actual')) and r.get('actual') is not None
+        es_discurso = r.get('es_discurso', False)
+        
+        # Si faltan menos de 2 min (-120s) para que salga la noticia, o pasaron hasta 5 min (+300s) y aún no sale el dato
+        if not es_discurso and not tiene_real and (-300 <= diff_segundos <= 120):
+            return 10, True # Activar Modo Francotirador cada 10 segundos
+            
+    return 180, False # Modo Normal cada 3 minutos
+
+# 7. Panel Principal con Refresco Inteligente (10s en noticia / 3m normal)
+@st.fragment(run_every=10)
 def renderizar_terminal():
     ahora = datetime.now(tz_bolivia)
-    df_mes = obtener_datos_mes(st.session_state.anio_vista, st.session_state.mes_vista)
+    
+    # Definir bloque de caché: cada 10s en modo francotirador, o cada 180s en modo normal
+    divisor_cache = 10 if st.session_state.modo_francotirador else 180
+    bloque_tiempo = int(ahora.timestamp() // divisor_cache)
+    
+    df_mes = obtener_datos_mes_rapido(st.session_state.anio_vista, st.session_state.mes_vista, bloque_tiempo)
+    df_actual = obtener_datos_mes_rapido(hoy_bol.year, hoy_bol.month, bloque_tiempo)
+    
+    # Evaluar si debemos activar/desactivar el Modo Francotirador para el siguiente ciclo
+    if not df_actual.empty:
+        df_hoy_solo = df_actual[df_actual['date'].dt.date == hoy_bol]
+        _, activar_sniper = calcular_intervalo_refresco(df_hoy_solo, ahora)
+        st.session_state.modo_francotirador = activar_sniper
+    else:
+        st.session_state.modo_francotirador = False
+
+    # Si NO estamos en modo francotirador, solo redibujar la interfaz cada 3 minutos (180s) para no interrumpir clics
+    if not st.session_state.modo_francotirador:
+        if 'ultimo_render_normal' not in st.session_state:
+            st.session_state.ultimo_render_normal = ahora
+        elif (ahora - st.session_state.ultimo_render_normal).total_seconds() < 175 and 'ya_renderizo' in st.session_state:
+            # Si el usuario hizo clic manualmente (ej. cambió de día), sí dejamos pasar el renderizado
+            pass
+        st.session_state.ultimo_render_normal = ahora
+    st.session_state.ya_renderizo = True
+
     breaking_news = obtener_breaking_news(FINNHUB_API_KEY)
     
     # --- A. CINTA HORIZONTAL (PRÓXIMAS DEL CALENDARIO + BREAKING NEWS EN VIVO) ---
-    df_actual = obtener_datos_mes(hoy_bol.year, hoy_bol.month)
     items_ticker = []
     
     for bn in breaking_news[:5]:
@@ -352,7 +465,7 @@ def renderizar_terminal():
             if bn['nas']: badges += '<span class="badge-nas">NAS100</span> '
             if bn['xau']: badges += '<span class="badge-xau">XAUUSD</span> '
             items_ticker.append(
-                f'<div class="ticker-item">{badges} <b>[{bn["hora"]}] {bn["titulo"]}</b> <i>({bn["fuente"]})</i></div>'
+                f'<div class="ticker-item">{badges} <b>[{bn["hora"]}] {html.escape(bn["titulo"])}</b> <i>({html.escape(bn["fuente"])})</i></div>'
             )
 
     if not df_actual.empty:
@@ -375,8 +488,8 @@ def renderizar_terminal():
             
             proy_t = obtener_sesgo_compacto(r, "XAU" if es_xau else "NAS", ahora)
             items_ticker.append(
-                f'<div class="ticker-item">{imp_ico} <b>{hora_t}</b> | {activos_html} <b>{r["title"]}</b> — '
-                f'Ant: <code>{ant_t}</code> | Pron: <code>{pron_t}</code> | Real: <code>{real_t}</code> → <b>{proy_t}</b></div>'
+                f'<div class="ticker-item">{imp_ico} <b>{hora_t}</b> | {activos_html} <b>{html.escape(str(r["title"]))}</b> — '
+                f'Ant: <code>{ant_t}</code> | Pron: <code>{pron_t}</code> | Real: <code>{real_t}</code> → <b>{html.escape(proy_t)}</b></div>'
             )
 
     if items_ticker:
@@ -471,11 +584,13 @@ def renderizar_terminal():
 
     st.markdown("---")
 
-    # --- D. DETALLE DEL DÍA SELECCIONADO (TABLAS NAS100 Y XAUUSD) ---
+    # --- D. DETALLE DEL DÍA SELECCIONADO (CON INDICADOR DE MODO FRANCOTIRADOR) ---
     f_sel = st.session_state.fecha_seleccionada
-    c_tit_dia, c_check_ruido, c_filtro_imp = st.columns([4.5, 2.5, 2.5])
+    estado_radar = "⚡ MODO FRANCOTIRADOR EN VIVO (10s)" if st.session_state.modo_francotirador else "🟢 Radar Normal (3m)"
+    
+    c_tit_dia, c_check_ruido, c_filtro_imp = st.columns([4.8, 2.3, 2.4])
     with c_tit_dia:
-        st.subheader(f"📋 Calendario del {f_sel.strftime('%d/%m/%Y')} (Sync: {ahora.strftime('%H:%M:%S')})")
+        st.subheader(f"📋 {f_sel.strftime('%d/%m/%Y')} | `{ahora.strftime('%H:%M:%S')}` • {estado_radar}")
     with c_check_ruido:
         st.write("")
         filtro_estricto = st.checkbox("🛡️ Ocultar subastas 3M/6M y agrícolas", value=False)
@@ -494,6 +609,7 @@ def renderizar_terminal():
         df_dia = df_dia[df_dia['imp_texto'].isin(filtro_imp)].sort_values(by='date', ascending=False)
 
         filas_nas, filas_xau = [], []
+        filas_nas_mob, filas_xau_mob = [], []
         banderas = {"US": "🇺🇸", "CN": "🇨🇳", "EU": "🇪🇺", "JP": "🇯🇵", "GB": "🇬🇧"}
         
         for _, row in df_dia.iterrows():
@@ -504,6 +620,7 @@ def renderizar_terminal():
             pais = row.get('country', 'US')
 
             if es_relevante_nas100(row, filtro_estricto):
+                sesgo_n = obtener_sesgo_compacto(row, "NAS", ahora)
                 filas_nas.append({
                     "Imp": row['Imp'],
                     "Hora": hora_str,
@@ -511,21 +628,33 @@ def renderizar_terminal():
                     "Ant": ant,
                     "Pron": pron,
                     "Real": act,
-                    "Proyección y Auditoría": obtener_sesgo_compacto(row, "NAS", ahora)
+                    "Proyección y Auditoría": sesgo_n
+                })
+                filas_nas_mob.append({
+                    "Imp": row['Imp'], "Hora": hora_str, "Noticia": row['title'],
+                    "Ant": ant, "Pron": pron, "Real": act, "Proy": sesgo_n
                 })
 
             if es_relevante_xauusd(row, filtro_estricto):
                 bandera = banderas.get(pais, "🌐")
+                titulo_x = f"{bandera} {row['title']}"
+                sesgo_x = obtener_sesgo_compacto(row, "XAU", ahora)
                 filas_xau.append({
                     "Imp": row['Imp'],
                     "Hora": hora_str,
-                    "Noticia (EE.UU., Fed & Global)": f"{bandera} {row['title']}",
+                    "Noticia (EE.UU., Fed & Global)": titulo_x,
                     "Ant": ant,
                     "Pron": pron,
                     "Real": act,
-                    "Proyección y Auditoría": obtener_sesgo_compacto(row, "XAU", ahora)
+                    "Proyección y Auditoría": sesgo_x
+                })
+                filas_xau_mob.append({
+                    "Imp": row['Imp'], "Hora": hora_str, "Noticia": titulo_x,
+                    "Ant": ant, "Pron": pron, "Real": act, "Proy": sesgo_x
                 })
 
+        # 1. BLOQUE SOLO PARA COMPUTADORA
+        st.markdown('<div class="solo-pc">', unsafe_allow_html=True)
         col_nas, col_xau = st.columns(2, gap="medium")
         with col_nas:
             st.markdown("#### 🇺🇸 NAS100 (Índice Nasdaq)")
@@ -540,12 +669,23 @@ def renderizar_terminal():
                 st.dataframe(pd.DataFrame(filas_xau), use_container_width=True, hide_index=True)
             else:
                 st.info("Sin eventos programados para XAUUSD con los filtros actuales.")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        # 2. BLOQUE SOLO PARA CELULAR
+        st.markdown('<div class="solo-celular">', unsafe_allow_html=True)
+        tab_nas, tab_xau = st.tabs([f"🇺🇸 NAS100 ({len(filas_nas_mob)})", f"🪙 XAUUSD ({len(filas_xau_mob)})"])
+        with tab_nas:
+            st.markdown(construir_tarjetas_movil(filas_nas_mob), unsafe_allow_html=True)
+        with tab_xau:
+            st.markdown(construir_tarjetas_movil(filas_xau_mob), unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
     else:
         st.warning("No se encontraron datos para el mes seleccionado.")
 
     # --- E. RADAR DE NOTICIAS IMPREVISTAS EN TIEMPO REAL (BREAKING NEWS) ---
     st.markdown("---")
-    st.subheader("🚨 Radar de Noticias Imprevistas (Última Hora en los Mercados)")
+    st.subheader("🚨 Radar de Noticias Imprevistas (Última Hora)")
     if breaking_news:
         cols_bn = st.columns(2)
         for idx, bn in enumerate(breaking_news[:6]):
