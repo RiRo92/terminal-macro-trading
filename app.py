@@ -113,7 +113,6 @@ st.markdown("""
         }
 
         /* --- DETECCIÓN AUTOMÁTICA DE PANTALLA EN STREAMLIT --- */
-        /* En PC (> 768px): Ocultar el contenedor móvil y dar altura a los botones del calendario */
         @media (min-width: 769px) {
             div[data-testid="stVerticalBlock"]:has(> div.element-container .marker-movil) {
                 display: none !important;
@@ -125,7 +124,6 @@ st.markdown("""
                 font-size: 0.82rem !important;
             }
         }
-        /* En Celular (<= 768px): Ocultar por completo el bloque gigante de PC */
         @media (max-width: 768px) {
             .block-container { padding-top: 2.8rem !important; padding-left: 0.6rem !important; padding-right: 0.6rem !important; }
             div[data-testid="stVerticalBlock"]:has(> div.element-container .marker-pc) {
@@ -137,14 +135,24 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# 2A. Descarga del feed oficial semanal de Forex Factory (Incluye Discursos Fed/FOMC)
-@st.cache_data(ttl=180)
+# 2A. Descarga protegida del feed semanal de Forex Factory (Discursos Fed/FOMC)
 def obtener_discursos_ff():
+    tz_bolivia = pytz.timezone('America/La_Paz')
+    ahora = datetime.now(tz_bolivia)
+    
+    # Usar memoria persistente en sesión por 20 minutos para evitar bloqueo 429 del servidor
+    if 'ff_cache_df' in st.session_state and 'ff_cache_time' in st.session_state:
+        if not st.session_state.ff_cache_df.empty and (ahora - st.session_state.ff_cache_time).total_seconds() < 1200:
+            return st.session_state.ff_cache_df
+
     url = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
-    headers = {"User-Agent": "Mozilla/5.0"}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json"
+    }
     eventos_ff = []
     try:
-        res = requests.get(url, headers=headers, timeout=8)
+        res = requests.get(url, headers=headers, timeout=10)
         if res.status_code == 200:
             datos = res.json()
             mapa_imp_ff = {"High": 1, "Medium": 0, "Low": -1, "Holiday": -1}
@@ -155,27 +163,41 @@ def obtener_discursos_ff():
                 if divisa not in mapa_pais_ff:
                     continue
                 
-                titulo = ev.get("title", "")
-                es_discurso = any(k in titulo.lower() for k in ["speaks", "speech", "testifies", "statement", "press conference", "minutes", "fed chair", "fomc"])
+                titulo = str(ev.get("title", "")).strip()
+                # Detectar discursos, testimonios, minutas o eventos sin cifras numéricas
+                palabras_discurso = ["speaks", "speech", "testifies", "statement", "press conference", "minutes", "fed chair", "fomc", "member", "gov", "president"]
+                es_discurso = any(k in titulo.lower() for k in palabras_discurso)
                 
-                if es_discurso or (not ev.get("forecast") and not ev.get("previous")):
+                prev_val = str(ev.get("previous", "")).strip()
+                fore_val = str(ev.get("forecast", "")).strip()
+                
+                if es_discurso or (prev_val == "" and fore_val == ""):
                     dt_parsed = pd.to_datetime(ev.get("date")).tz_convert('America/La_Paz')
                     eventos_ff.append({
                         "date": dt_parsed,
                         "country": mapa_pais_ff[divisa],
                         "title": f"🎙️ {titulo}" if es_discurso else titulo,
                         "importance": mapa_imp_ff.get(ev.get("impact"), -1),
-                        "previous": ev.get("previous") if ev.get("previous") != "" else None,
-                        "forecast": ev.get("forecast") if ev.get("forecast") != "" else None,
+                        "previous": prev_val if prev_val != "" else None,
+                        "forecast": fore_val if fore_val != "" else None,
                         "actual": None,
                         "unit": "",
                         "es_discurso": es_discurso
                     })
     except Exception:
         pass
-    return pd.DataFrame(eventos_ff)
 
-# 2B. Descarga de datos del calendario económico (Con caché dinámica para Modo Francotirador)
+    df_resultado = pd.DataFrame(eventos_ff)
+    # Solo sobrescribir el respaldo si la descarga trajo datos reales
+    if not df_resultado.empty:
+        st.session_state.ff_cache_df = df_resultado
+        st.session_state.ff_cache_time = ahora
+        return df_resultado
+    elif 'ff_cache_df' in st.session_state:
+        return st.session_state.ff_cache_df
+    return pd.DataFrame()
+
+# 2B. Descarga de datos del calendario económico (TradingView + Fusión blindada con Forex Factory)
 @st.cache_data(ttl=10)
 def obtener_datos_mes_rapido(anio, mes, bloque_tiempo):
     primer_dia = date(anio, mes, 1)
@@ -208,18 +230,24 @@ def obtener_datos_mes_rapido(anio, mes, bloque_tiempo):
     except Exception:
         pass
 
-    df_ff = obtener_discursos_ff()
-    if not df_ff.empty:
-        df_ff_mes = df_ff[(df_ff['date'].dt.year == anio) & (df_ff['date'].dt.month == mes)].copy()
-        if not df_ff_mes.empty:
-            if df_tv.empty:
-                df_tv = df_ff_mes
-            else:
-                titulos_tv = set(df_tv['title'].str.lower().str.replace('🎙️ ', '', regex=False).str[:18])
-                nuevos_ff = df_ff_mes[~df_ff_mes['title'].str.lower().str.replace('🎙️ ', '', regex=False).str[:18].isin(titulos_tv)]
-                df_tv = pd.concat([df_tv, nuevos_ff], ignore_index=True)
-
     return df_tv
+
+def fusionar_calendario_y_discursos(df_tv, anio, mes):
+    df_ff = obtener_discursos_ff()
+    if df_ff.empty:
+        return df_tv
+        
+    df_ff_mes = df_ff[(df_ff['date'].dt.year == anio) & (df_ff['date'].dt.month == mes)].copy()
+    if df_ff_mes.empty:
+        return df_tv
+        
+    if df_tv.empty:
+        return df_ff_mes
+        
+    # Evitar duplicados exactos comparando los primeros 15 caracteres en minúsculas
+    titulos_tv = set(df_tv['title'].str.lower().str.replace('🎙️ ', '', regex=False).str[:15])
+    nuevos_ff = df_ff_mes[~df_ff_mes['title'].str.lower().str.replace('🎙️ ', '', regex=False).str[:15].isin(titulos_tv)]
+    return pd.concat([df_tv, nuevos_ff], ignore_index=True)
 
 # 3. Descarga de Noticias Imprevistas / Breaking News (Finnhub Free Endpoint)
 @st.cache_data(ttl=120)
@@ -424,8 +452,11 @@ def renderizar_terminal():
     divisor_cache = 10 if st.session_state.modo_francotirador else 180
     bloque_tiempo = int(ahora.timestamp() // divisor_cache)
     
-    df_mes = obtener_datos_mes_rapido(st.session_state.anio_vista, st.session_state.mes_vista, bloque_tiempo)
-    df_actual = obtener_datos_mes_rapido(hoy_bol.year, hoy_bol.month, bloque_tiempo)
+    df_tv_mes = obtener_datos_mes_rapido(st.session_state.anio_vista, st.session_state.mes_vista, bloque_tiempo)
+    df_mes = fusionar_calendario_y_discursos(df_tv_mes, st.session_state.anio_vista, st.session_state.mes_vista)
+    
+    df_tv_actual = obtener_datos_mes_rapido(hoy_bol.year, hoy_bol.month, bloque_tiempo)
+    df_actual = fusionar_calendario_y_discursos(df_tv_actual, hoy_bol.year, hoy_bol.month)
     
     if not df_actual.empty:
         df_hoy_solo = df_actual[df_actual['date'].dt.date == hoy_bol]
@@ -511,8 +542,10 @@ def renderizar_terminal():
                 st.session_state.anio_vista = nueva_fecha_mob.year
                 st.rerun()
         with col_m_btn:
-            st.write("") # Alinear verticalmente con el campo de fecha
+            st.write("")
             if st.button("🔄 Sync", key="mob_sync_btn", use_container_width=True):
+                if 'ff_cache_time' in st.session_state:
+                    del st.session_state['ff_cache_time']
                 st.cache_data.clear()
                 st.rerun()
 
@@ -548,6 +581,8 @@ def renderizar_terminal():
                 st.rerun()
         with c_act:
             if st.button("🔄 Actualizar", key="pc_sync", use_container_width=True):
+                if 'ff_cache_time' in st.session_state:
+                    del st.session_state['ff_cache_time']
                 st.cache_data.clear()
                 st.rerun()
 
