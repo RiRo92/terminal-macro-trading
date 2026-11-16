@@ -135,12 +135,11 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# 2A. Descarga protegida del feed semanal de Forex Factory (Discursos Fed/FOMC)
+# 2A. Descarga protegida del feed semanal de Forex Factory (Discursos Fed/FOMC y Bancos Centrales)
 def obtener_discursos_ff():
     tz_bolivia = pytz.timezone('America/La_Paz')
     ahora = datetime.now(tz_bolivia)
     
-    # Usar memoria persistente en sesión por 20 minutos para evitar bloqueo 429 del servidor
     if 'ff_cache_df' in st.session_state and 'ff_cache_time' in st.session_state:
         if not st.session_state.ff_cache_df.empty and (ahora - st.session_state.ff_cache_time).total_seconds() < 1200:
             return st.session_state.ff_cache_df
@@ -156,7 +155,8 @@ def obtener_discursos_ff():
         if res.status_code == 200:
             datos = res.json()
             mapa_imp_ff = {"High": 1, "Medium": 0, "Low": -1, "Holiday": -1}
-            mapa_pais_ff = {"USD": "US", "CNY": "CN", "EUR": "EU", "JPY": "JP", "GBP": "GB"}
+            # Monedas seleccionadas: USD, CAD, CNY, EUR, JPY + GBP
+            mapa_pais_ff = {"USD": "US", "CAD": "CA", "CNY": "CN", "EUR": "EU", "JPY": "JP", "GBP": "GB"}
             
             for ev in datos:
                 divisa = ev.get("country", "")
@@ -164,8 +164,7 @@ def obtener_discursos_ff():
                     continue
                 
                 titulo = str(ev.get("title", "")).strip()
-                # Detectar discursos, testimonios, minutas o eventos sin cifras numéricas
-                palabras_discurso = ["speaks", "speech", "testifies", "statement", "press conference", "minutes", "fed chair", "fomc", "member", "gov", "president"]
+                palabras_discurso = ["speaks", "speech", "testifies", "statement", "press conference", "minutes", "fed chair", "fomc", "member", "gov", "president", "boc", "ecb", "boj", "boe"]
                 es_discurso = any(k in titulo.lower() for k in palabras_discurso)
                 
                 prev_val = str(ev.get("previous", "")).strip()
@@ -188,7 +187,6 @@ def obtener_discursos_ff():
         pass
 
     df_resultado = pd.DataFrame(eventos_ff)
-    # Solo sobrescribir el respaldo si la descarga trajo datos reales
     if not df_resultado.empty:
         st.session_state.ff_cache_df = df_resultado
         st.session_state.ff_cache_time = ahora
@@ -197,7 +195,7 @@ def obtener_discursos_ff():
         return st.session_state.ff_cache_df
     return pd.DataFrame()
 
-# 2B. Descarga de datos del calendario económico (TradingView + Fusión blindada con Forex Factory)
+# 2B. Descarga de datos del calendario económico (TradingView + Fusión con Forex Factory)
 @st.cache_data(ttl=10)
 def obtener_datos_mes_rapido(anio, mes, bloque_tiempo):
     primer_dia = date(anio, mes, 1)
@@ -211,7 +209,7 @@ def obtener_datos_mes_rapido(anio, mes, bloque_tiempo):
     params = {
         "from": inicio_utc,
         "to": fin_utc,
-        "countries": "US,CN,EU,JP,GB"
+        "countries": "US,CA,CN,EU,JP,GB" # Incluye Canadá (CA) junto con US, CN, EU, JP, GB
     }
     headers = {
         "Origin": "https://www.tradingview.com",
@@ -244,7 +242,6 @@ def fusionar_calendario_y_discursos(df_tv, anio, mes):
     if df_tv.empty:
         return df_ff_mes
         
-    # Evitar duplicados exactos comparando los primeros 15 caracteres en minúsculas
     titulos_tv = set(df_tv['title'].str.lower().str.replace('🎙️ ', '', regex=False).str[:15])
     nuevos_ff = df_ff_mes[~df_ff_mes['title'].str.lower().str.replace('🎙️ ', '', regex=False).str[:15].isin(titulos_tv)]
     return pd.concat([df_tv, nuevos_ff], ignore_index=True)
@@ -294,6 +291,7 @@ def obtener_breaking_news(api_key):
 
 # 4. Filtros por Activo
 def es_relevante_nas100(fila, filtro_estricto=False):
+    # NAS100 solo reacciona directamente a Estados Unidos (USD)
     if fila.get('country') != 'US':
         return False
     if not filtro_estricto:
@@ -313,9 +311,11 @@ def es_relevante_xauusd(fila, filtro_estricto=False):
     imp = fila.get('importance', -1)
     titulo = str(fila.get('title', '')).lower()
     
-    if pais in ['CN', 'EU', 'JP', 'GB']:
+    # Para Canadá (CA), China (CN), Eurozona (EU), Japón (JP) y Reino Unido (GB): dejar Alto Impacto (1)
+    if pais in ['CA', 'CN', 'EU', 'JP', 'GB']:
         return imp == 1
         
+    # Para Estados Unidos (US): mostrar todo por defecto
     if pais == 'US':
         if not filtro_estricto:
             return True
@@ -341,7 +341,7 @@ def obtener_sesgo_compacto(fila, activo, ahora_bol):
             return "🎙️ Discurso realizado (Revisar tono Hawkish/Dovish)"
         return "🎙️ Pendiente (Alta volatilidad en vivo)"
 
-    es_extranjera = (pais in ['CN', 'EU', 'JP', 'GB'])
+    es_extranjera = (pais in ['CA', 'CN', 'EU', 'JP', 'GB'])
     tiene_actual = pd.notna(actual) and actual is not None
     tiene_pron = pd.notna(pronostico) and pronostico is not None
     tiene_ant = pd.notna(anterior) and anterior is not None
@@ -643,7 +643,7 @@ def renderizar_terminal():
 
         filas_nas, filas_xau = [], []
         filas_nas_mob, filas_xau_mob = [], []
-        banderas = {"US": "🇺🇸", "CN": "🇨🇳", "EU": "🇪🇺", "JP": "🇯🇵", "GB": "🇬🇧"}
+        banderas = {"US": "🇺🇸", "CA": "🇨🇦", "CN": "🇨🇳", "EU": "🇪🇺", "JP": "🇯🇵", "GB": "🇬🇧"}
         
         for _, row in df_dia.iterrows():
             hora_str = row['date'].strftime('%H:%M')
@@ -675,7 +675,7 @@ def renderizar_terminal():
                 filas_xau.append({
                     "Imp": row['Imp'],
                     "Hora": hora_str,
-                    "Noticia (EE.UU., Fed & Global)": titulo_x,
+                    "Noticia (USD, CAD, CNY, EUR, JPY, GBP)": titulo_x,
                     "Ant": ant,
                     "Pron": pron,
                     "Real": act,
