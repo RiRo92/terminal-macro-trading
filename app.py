@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, date
 import calendar
 import pytz
 import html
+import re
 
 # 1. Configuración de pantalla completa y compacta
 st.set_page_config(page_title="Terminal Macro & Breaking News: NAS100 & XAUUSD", layout="wide", initial_sidebar_state="collapsed")
@@ -12,7 +13,7 @@ st.set_page_config(page_title="Terminal Macro & Breaking News: NAS100 & XAUUSD",
 # API Key gratuita de Finnhub
 FINNHUB_API_KEY = "dbtk2ehr01qtr41fbk30dbtk2ehr01qtr41fbk3g"
 
-# Estilos CSS Responsivos
+# Estilos CSS Responsivos y Botón Flotante
 st.markdown("""
     <style>
         .block-container { padding-top: 3.3rem !important; padding-bottom: 1rem; }
@@ -36,45 +37,23 @@ st.markdown("""
             padding-left: 10%;
             animation: ticker-scroll 130s linear infinite;
         }
-        .ticker-wrap:hover .ticker-move {
-            animation-play-state: paused;
-        }
+        .ticker-wrap:hover .ticker-move { animation-play-state: paused; }
         @keyframes ticker-scroll {
             0%   { transform: translate3d(0, 0, 0); }
             100% { transform: translate3d(-100%, 0, 0); }
         }
-        .ticker-item {
-            display: inline-block;
-            padding: 0 30px;
-            font-size: 0.95rem;
-            color: #F8FAFC;
-            border-right: 1px solid #475569;
-        }
+        .ticker-item { display: inline-block; padding: 0 30px; font-size: 0.95rem; color: #F8FAFC; border-right: 1px solid #475569; }
         .badge-nas { background-color: #2563EB; color: white; padding: 2px 7px; border-radius: 4px; font-weight: bold; font-size: 0.78rem; }
         .badge-xau { background-color: #D97706; color: white; padding: 2px 7px; border-radius: 4px; font-weight: bold; font-size: 0.78rem; }
         .badge-brk { background-color: #DC2626; color: white; padding: 2px 7px; border-radius: 4px; font-weight: bold; font-size: 0.78rem; }
         
-        /* Encabezados de días de la semana en el calendario PC */
-        .cal-header, .cal-header-wknd {
-            text-align: center;
-            font-weight: bold;
-            padding: 6px;
-            border-radius: 4px;
-            margin-bottom: 4px;
-            font-size: 0.85rem;
-        }
+        /* Encabezados PC */
+        .cal-header, .cal-header-wknd { text-align: center; font-weight: bold; padding: 6px; border-radius: 4px; margin-bottom: 4px; font-size: 0.85rem; }
         .cal-header { background-color: #1F2937; color: #F9FAFB; }
         .cal-header-wknd { background-color: #451A1A; color: #FCA5A5; }
 
-        /* Tarjetas móviles limpias */
-        .mob-card {
-            background-color: #111827;
-            border: 1px solid #374151;
-            border-left: 4px solid #3B82F6;
-            border-radius: 8px;
-            padding: 10px 12px;
-            margin-bottom: 8px;
-        }
+        /* Tarjetas móviles */
+        .mob-card { background-color: #111827; border: 1px solid #374151; border-left: 4px solid #3B82F6; border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
         .mob-card-high { border-left-color: #EF4444; }
         .mob-card-med  { border-left-color: #F59E0B; }
         .mob-card-low  { border-left-color: #10B981; }
@@ -83,23 +62,84 @@ st.markdown("""
         .mob-nums code { color: #E5E7EB; background-color: #1F2937; padding: 1px 5px; border-radius: 4px; }
         .mob-proy { font-size: 0.84rem; font-weight: bold; color: #E5E7EB; }
 
-        /* --- DETECCIÓN AUTOMÁTICA DE PANTALLA EN STREAMLIT --- */
+        /* --- DETECCIÓN AUTOMÁTICA Y BOTÓN FLOTANTE --- */
         @media (min-width: 769px) {
             div[data-testid="stVerticalBlock"]:has(> div.element-container .marker-movil) { display: none !important; }
             div[data-testid="stVerticalBlock"]:has(> div.element-container .marker-pc) div[data-testid="column"] button {
                 height: 68px !important; padding: 4px !important; line-height: 1.25 !important; font-size: 0.82rem !important;
             }
+            /* Ocultar el botón flotante en PC */
+            div[data-testid="stButton"]:has(p:contains("🔄 Flotante")) { display: none !important; }
         }
         @media (max-width: 768px) {
             .block-container { padding-top: 2.8rem !important; padding-left: 0.6rem !important; padding-right: 0.6rem !important; }
             div[data-testid="stVerticalBlock"]:has(> div.element-container .marker-pc) { display: none !important; }
             .ticker-wrap { padding: 7px 0; margin-bottom: 10px; }
             .ticker-item { font-size: 0.84rem; padding: 0 18px; }
+            
+            /* Estilos del Botón Flotante en Celular */
+            div[data-testid="stButton"]:has(p:contains("🔄 Flotante")) {
+                position: fixed !important;
+                bottom: 25px !important;
+                right: 25px !important;
+                z-index: 99999 !important;
+            }
+            div[data-testid="stButton"]:has(p:contains("🔄 Flotante")) button {
+                width: 60px !important;
+                height: 60px !important;
+                border-radius: 50% !important;
+                background-color: #3B82F6 !important;
+                color: white !important;
+                border: 2px solid #60A5FA !important;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.5) !important;
+                display: flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                padding: 0 !important;
+            }
+            div[data-testid="stButton"]:has(p:contains("🔄 Flotante")) p { font-size: 0px !important; }
+            div[data-testid="stButton"]:has(p:contains("🔄 Flotante")) p::before {
+                content: "🔄" !important;
+                font-size: 26px !important;
+            }
         }
     </style>
 """, unsafe_allow_html=True)
 
-# 2A. Descarga protegida del feed semanal de Forex Factory
+# 2. Diccionario de Traducción Rápida (Macro Trading)
+DICCIONARIO_TRADUCCION = {
+    "Speaks": "Habla", "Member": "Miembro", "Balance of Trade": "Balanza Comercial",
+    "Crude Oil Stock Change": "Cambio Inv. Crudo", "Unemployment Rate": "Tasa de Desempleo",
+    "Initial Jobless Claims": "Peticiones de Desempleo", "Core CPI": "IPC Subyacente",
+    " CPI": " IPC", "Retail Sales": "Ventas Minoristas", "Non Farm Payrolls": "Nóminas No Agrícolas",
+    "Gross Domestic Product": "PIB", " GDP": " PIB", "Interest Rate Decision": "Decisión de Tasas",
+    "Building Permits": "Permisos de Construcción", "Existing Home Sales": "Ventas Viviendas Usadas",
+    "New Home Sales": "Ventas Viviendas Nuevas", "Services PMI": "PMI Servicios",
+    "Manufacturing PMI": "PMI Manufacturero", "Fed Chair": "Pdte. Fed", "Testifies": "Testifica",
+    "Statement": "Declaración", "Minutes": "Actas FOMC", "Press Conference": "Rueda de Prensa",
+    "Product Imports": "Imp. Productos", "Gasoline Stocks": "Inv. Gasolina",
+    "Distillate Stocks": "Inv. Destilados", "Heating Oil": "Aceite Calefacción",
+    "Crude Imports": "Imp. Crudo", "Crude Runs": "Refinación Crudo",
+    "Cushing Number": "Inv. Cushing", "Weekly Statistical Bulletin": "Boletín Semanal",
+    "Consumer Confidence": "Confianza Consumidor", "Industrial Production": "Producción Industrial",
+    "Durable Goods Orders": "Pedidos Bienes Duraderos", "Trade Balance": "Balanza Comercial",
+    "Jobless Claims": "Subsidios Desempleo", "Wage Growth": "Crecimiento Salarial",
+    "Inflation Rate": "Tasa Inflación", "Producer Price Index": "IPP",
+    " PPI": " IPP", "Wholesale Inventories": "Inventarios Mayoristas",
+    " Fed": " Reserva Federal", " ECB": " BCE", " BoE": " BdI", " BoJ": " BdJ",
+    "YoY": "Interanual", "MoM": "Mensual", "QoQ": "Trimestral",
+    "Core PCE Price Index": "PCE Subyacente", "PCE Price Index": "Índice PCE"
+}
+
+def traducir_texto(texto, activo=True):
+    if not activo or not texto: return texto
+    # Reemplazos directos rápidos para preservar rendimiento
+    for ing, esp in DICCIONARIO_TRADUCCION.items():
+        texto = texto.replace(ing, esp)
+        texto = texto.replace(ing.upper(), esp.upper())
+    return texto
+
+# 3A. Descarga protegida del feed semanal de Forex Factory
 def obtener_discursos_ff():
     tz_utc = pytz.utc
     ahora = datetime.now(tz_utc)
@@ -154,7 +194,7 @@ def obtener_discursos_ff():
         return st.session_state.ff_cache_df
     return pd.DataFrame()
 
-# 2B. Descarga de datos del calendario económico
+# 3B. Descarga de datos del calendario económico
 @st.cache_data(ttl=10)
 def obtener_datos_mes_rapido(anio, mes, bloque_tiempo):
     primer_dia = date(anio, mes, 1)
@@ -182,13 +222,10 @@ def obtener_datos_mes_rapido(anio, mes, bloque_tiempo):
 
 def fusionar_calendario_y_discursos(df_tv, anio, mes):
     df_ff = obtener_discursos_ff()
-    if df_ff.empty: 
-        return df_tv
+    if df_ff.empty: return df_tv
     df_ff_mes = df_ff[(df_ff['date'].dt.year == anio) & (df_ff['date'].dt.month == mes)].copy()
-    if df_ff_mes.empty: 
-        return df_tv
-    if df_tv.empty: 
-        return df_ff_mes
+    if df_ff_mes.empty: return df_tv
+    if df_tv.empty: return df_ff_mes
         
     titulos_tv = set(df_tv['title'].str.lower().str.replace('🎙️ ', '', regex=False).str[:15])
     nuevos_ff = df_ff_mes[~df_ff_mes['title'].str.lower().str.replace('🎙️ ', '', regex=False).str[:15].isin(titulos_tv)]
@@ -197,7 +234,7 @@ def fusionar_calendario_y_discursos(df_tv, anio, mes):
     df_res['date'] = pd.to_datetime(df_res['date'], utc=True)
     return df_res
 
-# 3. Descarga de Noticias Imprevistas / Breaking News
+# 4. Descarga de Noticias Imprevistas / Breaking News
 @st.cache_data(ttl=120)
 def obtener_breaking_news(api_key):
     url = f"https://finnhub.io/api/v1/news?category=general&token={api_key}"
@@ -235,7 +272,7 @@ def obtener_breaking_news(api_key):
         pass
     return noticias_filtradas
 
-# 4. Filtros por Activo
+# 5. Filtros por Activo
 def es_relevante_nas100(fila, filtro_estricto=False):
     if fila.get('country') != 'US': return False
     if not filtro_estricto: return True
@@ -254,7 +291,7 @@ def es_relevante_xauusd(fila, filtro_estricto=False):
         return not any(palabra in titulo for palabra in ruido_xau)
     return False
 
-# 5. Lógica de Proyección + Auditoría + Discursos
+# 6. Lógica de Proyección + Auditoría + Discursos
 def obtener_sesgo_compacto(fila, activo, ahora_utc):
     actual = fila.get('actual')
     pronostico = fila.get('forecast')
@@ -332,7 +369,7 @@ def construir_tarjetas_movil(filas_lista, etiqueta_tz, bandera_tz):
         html_cards.append(card)
     return "".join(html_cards)
 
-# 6. Estado de sesión para zonas horarias
+# 7. Estado de sesión para zonas horarias
 ZONAS_HORARIAS = {
     "Bolivia": {"tz": "America/La_Paz", "bandera": "🇧🇴", "etiqueta": "BO"},
     "Argentina": {"tz": "America/Argentina/Buenos_Aires", "bandera": "🇦🇷", "etiqueta": "AR"},
@@ -349,14 +386,12 @@ OPCIONES_ZONAS = list(ZONAS_HORARIAS.keys())
 tz_utc = pytz.utc
 ahora_utc = datetime.now(tz_utc)
 
-if 'zona_seleccionada' not in st.session_state: 
-    st.session_state.zona_seleccionada = "Bolivia"
-    
-if 'fecha_seleccionada' not in st.session_state:
-    st.session_state.fecha_seleccionada = ahora_utc.astimezone(pytz.timezone(ZONAS_HORARIAS[st.session_state.zona_seleccionada]["tz"])).date()
+if 'zona_seleccionada' not in st.session_state: st.session_state.zona_seleccionada = "Bolivia"
+if 'fecha_seleccionada' not in st.session_state: st.session_state.fecha_seleccionada = ahora_utc.astimezone(pytz.timezone(ZONAS_HORARIAS[st.session_state.zona_seleccionada]["tz"])).date()
 if 'mes_vista' not in st.session_state: st.session_state.mes_vista = st.session_state.fecha_seleccionada.month
 if 'anio_vista' not in st.session_state: st.session_state.anio_vista = st.session_state.fecha_seleccionada.year
 if 'modo_francotirador' not in st.session_state: st.session_state.modo_francotirador = False
+if 'activar_traductor' not in st.session_state: st.session_state.activar_traductor = True
 
 def calcular_intervalo_refresco(df_hoy, ahora_utc):
     if df_hoy.empty: return 180, False
@@ -368,7 +403,7 @@ def calcular_intervalo_refresco(df_hoy, ahora_utc):
         if not es_discurso and not tiene_real and (-300 <= diff_segundos <= 120): return 10, True
     return 180, False
 
-# 7. Panel Principal
+# 8. Panel Principal
 @st.fragment(run_every=10)
 def renderizar_terminal():
     tz_ny = pytz.timezone('America/New_York')
@@ -398,6 +433,7 @@ def renderizar_terminal():
         st.session_state.modo_francotirador = False
 
     breaking_news = obtener_breaking_news(FINNHUB_API_KEY)
+    traductor_on = st.session_state.activar_traductor
     
     # --- A. CINTA HORIZONTAL ---
     items_ticker = []
@@ -407,7 +443,8 @@ def renderizar_terminal():
             if bn['nas']: badges += '<span class="badge-nas">NAS100</span> '
             if bn['xau']: badges += '<span class="badge-xau">XAUUSD</span> '
             hora_bn_ny = bn['fecha_dt'].astimezone(tz_ny).strftime('%H:%M')
-            items_ticker.append(f'<div class="ticker-item">{badges} <b>[🗽 {hora_bn_ny}] {html.escape(bn["titulo"])}</b> <i>({html.escape(bn["fuente"])})</i></div>')
+            titulo_trad = traducir_texto(bn["titulo"], traductor_on)
+            items_ticker.append(f'<div class="ticker-item">{badges} <b>[🗽 {hora_bn_ny}] {html.escape(titulo_trad)}</b> <i>({html.escape(bn["fuente"])})</i></div>')
 
     if not df_actual.empty:
         df_futuras = df_actual[(df_actual['date'] >= ahora_utc - timedelta(minutes=30))].sort_values(by='date', ascending=True)
@@ -422,9 +459,10 @@ def renderizar_terminal():
             ant_t, pron_t, real_t = formatear_num(r.get('previous'), r.get('unit')), formatear_num(r.get('forecast'), r.get('unit')), formatear_num(r.get('actual'), r.get('unit'))
             activos_html = ('<span class="badge-nas">NAS100</span> ' if es_nas else '') + ('<span class="badge-xau">XAUUSD</span> ' if es_xau else '')
             proy_t = obtener_sesgo_compacto(r, "XAU" if es_xau else "NAS", ahora_utc)
+            titulo_trad = traducir_texto(str(r["title"]), traductor_on)
             
             items_ticker.append(
-                f'<div class="ticker-item">{imp_ico} <b>🗽{hora_ny_t} | {bandera_sel}{hora_sel_t}</b> | {activos_html} <b>{html.escape(str(r["title"]))}</b> — '
+                f'<div class="ticker-item">{imp_ico} <b>🗽{hora_ny_t} | {bandera_sel}{hora_sel_t}</b> | {activos_html} <b>{html.escape(titulo_trad)}</b> — '
                 f'Ant: <code>{ant_t}</code> | Pron: <code>{pron_t}</code> | Real: <code>{real_t}</code> → <b>{html.escape(proy_t)}</b></div>'
             )
 
@@ -513,17 +551,23 @@ def renderizar_terminal():
     f_sel = st.session_state.fecha_seleccionada
     estado_radar = "⚡ EN VIVO (10s)" if st.session_state.modo_francotirador else "🟢 Normal (3m)"
     
-    # 3 Columnas principales (Con selector de Zona Horaria incluido)
-    c_tit_dia, c_check_ruido, c_filtro_imp, c_tz = st.columns([4.0, 1.8, 1.7, 1.5])
+    # 4 Columnas principales (Con Traductor y Zona Horaria)
+    c_tit_dia, c_check_ruido, c_trad, c_filtro_imp, c_tz = st.columns([3.2, 1.4, 1.1, 1.2, 1.4])
     with c_tit_dia:
         st.subheader(f"📋 {f_sel.strftime('%d/%m/%Y')} | 🗽 NY {ahora_ny.strftime('%H:%M')} • {bandera_sel} {etiqueta_sel} {ahora_sel.strftime('%H:%M')} | {estado_radar}")
     with c_check_ruido:
         st.write("")
-        filtro_estricto = st.checkbox("🛡️ Ocultar letras y agrícolas", value=False)
+        filtro_estricto = st.checkbox("🛡️ Ocultar letras/agrícolas", value=False)
+    with c_trad:
+        st.write("")
+        nueva_trad = st.checkbox("🇪🇸 Traducir", value=st.session_state.activar_traductor)
+        if nueva_trad != st.session_state.activar_traductor:
+            st.session_state.activar_traductor = nueva_trad
+            st.rerun()
     with c_filtro_imp:
         filtro_imp = st.multiselect("Impacto:", options=["Alto", "Medio", "Bajo"], default=["Alto", "Medio", "Bajo"], label_visibility="collapsed")
     with c_tz:
-        nueva_zona = st.selectbox("🌍 Zona Horaria:", options=OPCIONES_ZONAS, index=OPCIONES_ZONAS.index(st.session_state.zona_seleccionada), label_visibility="collapsed")
+        nueva_zona = st.selectbox("🌍 Zona:", options=OPCIONES_ZONAS, index=OPCIONES_ZONAS.index(st.session_state.zona_seleccionada), label_visibility="collapsed")
         if nueva_zona != st.session_state.zona_seleccionada:
             st.session_state.zona_seleccionada = nueva_zona
             st.rerun()
@@ -547,16 +591,17 @@ def renderizar_terminal():
 
             if es_relevante_nas100(row, filtro_estricto):
                 sesgo_n = obtener_sesgo_compacto(row, "NAS", ahora_utc)
-                datos_fila = {"Imp": row['Imp'], "🗽 NY": hora_ny_str, f"{bandera_sel} {etiqueta_sel}": hora_sel_str, "Noticia (EE.UU. & Fed)": row['title'], "Ant": ant, "Pron": pron, "Real": act, "Proyección y Auditoría": sesgo_n}
+                tit_trad = traducir_texto(row['title'], traductor_on)
+                datos_fila = {"Imp": row['Imp'], "🗽 NY": hora_ny_str, f"{bandera_sel} {etiqueta_sel}": hora_sel_str, "Noticia (EE.UU. & Fed)": tit_trad, "Ant": ant, "Pron": pron, "Real": act, "Proyección y Auditoría": sesgo_n}
                 filas_nas.append(datos_fila)
-                filas_nas_mob.append({"Imp": row['Imp'], "NY": hora_ny_str, etiqueta_sel: hora_sel_str, "Noticia": row['title'], "Ant": ant, "Pron": pron, "Real": act, "Proy": sesgo_n})
+                filas_nas_mob.append({"Imp": row['Imp'], "NY": hora_ny_str, etiqueta_sel: hora_sel_str, "Noticia": tit_trad, "Ant": ant, "Pron": pron, "Real": act, "Proy": sesgo_n})
 
             if es_relevante_xauusd(row, filtro_estricto):
-                titulo_x = f"{banderas.get(pais, '🌐')} {row['title']}"
+                tit_trad_x = f"{banderas.get(pais, '🌐')} {traducir_texto(row['title'], traductor_on)}"
                 sesgo_x = obtener_sesgo_compacto(row, "XAU", ahora_utc)
-                datos_fila_x = {"Imp": row['Imp'], "🗽 NY": hora_ny_str, f"{bandera_sel} {etiqueta_sel}": hora_sel_str, "Noticia (USD, CAD, CNY, EUR, JPY, GBP)": titulo_x, "Ant": ant, "Pron": pron, "Real": act, "Proyección y Auditoría": sesgo_x}
+                datos_fila_x = {"Imp": row['Imp'], "🗽 NY": hora_ny_str, f"{bandera_sel} {etiqueta_sel}": hora_sel_str, "Noticia (USD, CAD, CNY, EUR, JPY, GBP)": tit_trad_x, "Ant": ant, "Pron": pron, "Real": act, "Proyección y Auditoría": sesgo_x}
                 filas_xau.append(datos_fila_x)
-                filas_xau_mob.append({"Imp": row['Imp'], "NY": hora_ny_str, etiqueta_sel: hora_sel_str, "Noticia": titulo_x, "Ant": ant, "Pron": pron, "Real": act, "Proy": sesgo_x})
+                filas_xau_mob.append({"Imp": row['Imp'], "NY": hora_ny_str, etiqueta_sel: hora_sel_str, "Noticia": tit_trad_x, "Ant": ant, "Pron": pron, "Real": act, "Proy": sesgo_x})
 
         # 1. BLOQUE SOLO PARA COMPUTADORA
         with st.container():
@@ -581,6 +626,12 @@ def renderizar_terminal():
     else:
         st.warning("No se encontraron datos para el mes seleccionado.")
 
+    # --- BOTÓN FLOTANTE (Solo visible en celular vía CSS) ---
+    if st.button("🔄 Flotante", key="btn_flotante_sync"):
+        if 'ff_cache_time' in st.session_state: del st.session_state['ff_cache_time']
+        st.cache_data.clear()
+        st.rerun()
+
     # --- E. RADAR DE NOTICIAS IMPREVISTAS EN TIEMPO REAL ---
     st.markdown("---")
     st.subheader("🚨 Radar de Noticias Imprevistas (Última Hora)")
@@ -590,12 +641,24 @@ def renderizar_terminal():
             tag_str = " | ".join([t for t, cond in [("🇺🇸 NAS100", bn['nas']), ("🪙 XAUUSD", bn['xau'])] if cond])
             hora_bn_ny = bn['fecha_dt'].astimezone(tz_ny).strftime('%H:%M')
             hora_bn_sel = bn['fecha_dt'].astimezone(tz_sel).strftime('%H:%M')
+            tit_trad = traducir_texto(bn['titulo'], traductor_on)
             with cols_bn[idx % 2]:
                 with st.container(border=True):
                     st.markdown(f"**`🗽{hora_bn_ny} | {bandera_sel}{hora_bn_sel}` | {tag_str} | _{bn['fuente']}_**")
-                    st.markdown(f"**[{bn['titulo']}]({bn['url']})**")
-                    if bn['resumen']: st.caption(bn['resumen'][:160] + "..." if len(bn['resumen']) > 160 else bn['resumen'])
+                    st.markdown(f"**[{tit_trad}]({bn['url']})**")
+                    if bn['resumen']: st.caption(traducir_texto(bn['resumen'][:160], traductor_on) + "..." if len(bn['resumen']) > 160 else traducir_texto(bn['resumen'], traductor_on))
     else:
         st.info("No se detectaron titulares imprevistos de alto impacto en las últimas horas.")
+
+    # --- F. CONTADOR DE VISITAS DISCRETO ---
+    st.markdown("<br><br>", unsafe_allow_html=True)
+    c1, c2, c3 = st.columns([1, 2, 1])
+    with c2:
+        st.markdown(
+            '<div style="text-align: center; opacity: 0.35;">'
+            '<img src="https://visitor-badge.laobi.icu/badge?page_id=RiRo92.terminal-macro-trading&left_text=Visitas" alt="Visitas">'
+            '</div>', 
+            unsafe_allow_html=True
+        )
 
 renderizar_terminal()
