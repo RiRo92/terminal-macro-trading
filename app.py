@@ -18,7 +18,7 @@ st.markdown("""
         .block-container { padding-top: 3.3rem !important; padding-bottom: 1rem; }
         h1 { font-size: 1.6rem !important; margin-bottom: 0rem !important; }
         
-        /* Cinta horizontal tipo noticiero (Velocidad lenta y legible) */
+        /* Cinta horizontal tipo noticiero */
         .ticker-wrap {
             width: 100%;
             overflow: hidden;
@@ -394,7 +394,7 @@ def formatear_num(val, unidad):
         return f"{val}{u}"
     return "-"
 
-# Función para generar tarjetas HTML móviles limpias
+# Función para generar tarjetas HTML móviles limpias con ambas horas
 def construir_tarjetas_movil(filas_lista):
     if not filas_lista:
         return "<p style='color:#9CA3AF; font-size:0.9rem;'>Sin eventos programados para esta fecha.</p>"
@@ -406,7 +406,7 @@ def construir_tarjetas_movil(filas_lista):
         proy_limpia = html.escape(str(f["Proy"]))
         card = f"""
         <div class="mob-card {clase_borde}">
-            <div class="mob-top">{imp_ico} <b>{f['Hora']}</b> — {titulo_limpio}</div>
+            <div class="mob-top">{imp_ico} 🗽 {f['NY']} | 🇧🇴 {f['BO']} — {titulo_limpio}</div>
             <div class="mob-nums">Ant: <code>{f['Ant']}</code> &nbsp;|&nbsp; Pron: <code>{f['Pron']}</code> &nbsp;|&nbsp; Real: <code>{f['Real']}</code></div>
             <div class="mob-proy">{proy_limpia}</div>
         </div>
@@ -440,11 +440,11 @@ def calcular_intervalo_refresco(df_hoy, ahora):
             return 10, True
     return 180, False
 
-# 7. Panel Principal con Refresco Inteligente (10s en noticia / 3m normal)
+# 7. Panel Principal con Refresco Inteligente
 @st.fragment(run_every=10)
 def renderizar_terminal():
-    ahora = datetime.now(tz_bolivia)
     tz_ny = pytz.timezone('America/New_York')
+    ahora = datetime.now(tz_bolivia)
     ahora_ny = ahora.astimezone(tz_ny)
     
     divisor_cache = 10 if st.session_state.modo_francotirador else 180
@@ -465,7 +465,7 @@ def renderizar_terminal():
 
     breaking_news = obtener_breaking_news(FINNHUB_API_KEY)
     
-    # --- A. CINTA HORIZONTAL (PRÓXIMAS DEL CALENDARIO + BREAKING NEWS EN VIVO) ---
+    # --- A. CINTA HORIZONTAL ---
     items_ticker = []
     for bn in breaking_news[:5]:
         if bn['fecha_dt'] >= (ahora - timedelta(hours=6)):
@@ -485,7 +485,8 @@ def renderizar_terminal():
                 continue
                 
             imp_ico = "🔴" if r.get('importance') == 1 else "🟠" if r.get('importance') == 0 else "🟡"
-            hora_t = r['date'].strftime('%d/%m %H:%M')
+            hora_bol_t = r['date'].strftime('%H:%M')
+            hora_ny_t = r['date'].astimezone(tz_ny).strftime('%H:%M')
             ant_t = formatear_num(r.get('previous'), r.get('unit'))
             pron_t = formatear_num(r.get('forecast'), r.get('unit'))
             real_t = formatear_num(r.get('actual'), r.get('unit'))
@@ -496,7 +497,7 @@ def renderizar_terminal():
             
             proy_t = obtener_sesgo_compacto(r, "XAU" if es_xau else "NAS", ahora)
             items_ticker.append(
-                f'<div class="ticker-item">{imp_ico} <b>{hora_t}</b> | {activos_html} <b>{html.escape(str(r["title"]))}</b> — '
+                f'<div class="ticker-item">{imp_ico} <b>🗽{hora_ny_t} | 🇧🇴{hora_bol_t}</b> | {activos_html} <b>{html.escape(str(r["title"]))}</b> — '
                 f'Ant: <code>{ant_t}</code> | Pron: <code>{pron_t}</code> | Real: <code>{real_t}</code> → <b>{html.escape(proy_t)}</b></div>'
             )
 
@@ -506,7 +507,6 @@ def renderizar_terminal():
     else:
         st.markdown('<div class="ticker-wrap"><div class="ticker-move"><div class="ticker-item">📡 Monitoreando mercados en vivo... Sin eventos próximos.</div></div></div>', unsafe_allow_html=True)
 
-    # Pre-calcular qué activos tienen noticias cada día del mes
     resumen_dias = {}
     if not df_mes.empty:
         df_mes['fecha_corta'] = df_mes['date'].dt.date
@@ -521,9 +521,7 @@ def renderizar_terminal():
 
     meses_es = ["", "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"]
 
-    # =========================================================================
-    # --- B1. SELECTOR NATIVO COMPACTO SOLO PARA CELULAR (Abre calendario táctil)
-    # =========================================================================
+    # --- B1. SELECTOR NATIVO COMPACTO (CELULAR) ---
     with st.container():
         st.markdown('<span class="marker-movil"></span>', unsafe_allow_html=True)
         col_m_fecha, col_m_btn = st.columns([3, 1])
@@ -542,14 +540,11 @@ def renderizar_terminal():
         with col_m_btn:
             st.write("")
             if st.button("🔄 Sync", key="mob_sync_btn", use_container_width=True):
-                if 'ff_cache_time' in st.session_state:
-                    del st.session_state['ff_cache_time']
+                if 'ff_cache_time' in st.session_state: del st.session_state['ff_cache_time']
                 st.cache_data.clear()
                 st.rerun()
 
-    # =========================================================================
-    # --- B2. CALENDARIO MENSUAL COMPLETO SOLO PARA COMPUTADORA (7 Columnas) ---
-    # =========================================================================
+    # --- B2. CALENDARIO MENSUAL COMPLETO (PC) ---
     with st.container():
         st.markdown('<span class="marker-pc"></span>', unsafe_allow_html=True)
         c_prev, c_mes, c_next, c_hoy, c_act = st.columns([1, 4, 1, 1.5, 1.5])
@@ -579,8 +574,7 @@ def renderizar_terminal():
                 st.rerun()
         with c_act:
             if st.button("🔄 Actualizar", key="pc_sync", use_container_width=True):
-                if 'ff_cache_time' in st.session_state:
-                    del st.session_state['ff_cache_time']
+                if 'ff_cache_time' in st.session_state: del st.session_state['ff_cache_time']
                 st.cache_data.clear()
                 st.rerun()
 
@@ -622,7 +616,7 @@ def renderizar_terminal():
     
     c_tit_dia, c_check_ruido, c_filtro_imp = st.columns([5.2, 2.0, 2.4])
     with c_tit_dia:
-        st.subheader(f"📋 {f_sel.strftime('%d/%m/%Y')} | 🗽 NY {ahora_ny.strftime('%H:%M')} • 🇧🇴 BO {ahora_bol.strftime('%H:%M')} | {estado_radar}")
+        st.subheader(f"📋 {f_sel.strftime('%d/%m/%Y')} | 🗽 NY {ahora_ny.strftime('%H:%M')} • 🇧🇴 BO {ahora.strftime('%H:%M')} | {estado_radar}")
     with c_check_ruido:
         filtro_estricto = st.checkbox("🛡️ Ocultar subastas 3M/6M y agrícolas", value=False)
     with c_filtro_imp:
@@ -644,7 +638,9 @@ def renderizar_terminal():
         banderas = {"US": "🇺🇸", "CA": "🇨🇦", "CN": "🇨🇳", "EU": "🇪🇺", "JP": "🇯🇵", "GB": "🇬🇧"}
         
         for _, row in df_dia.iterrows():
-            hora_str = row['date'].strftime('%H:%M')
+            hora_bol_str = row['date'].strftime('%H:%M')
+            hora_ny_str = row['date'].astimezone(tz_ny).strftime('%H:%M')
+            
             ant = formatear_num(row.get('previous'), row.get('unit'))
             pron = formatear_num(row.get('forecast'), row.get('unit'))
             act = formatear_num(row.get('actual'), row.get('unit'))
@@ -654,7 +650,8 @@ def renderizar_terminal():
                 sesgo_n = obtener_sesgo_compacto(row, "NAS", ahora)
                 filas_nas.append({
                     "Imp": row['Imp'],
-                    "Hora": hora_str,
+                    "🗽 NY": hora_ny_str,
+                    "🇧🇴 BO": hora_bol_str,
                     "Noticia (EE.UU. & Fed)": row['title'],
                     "Ant": ant,
                     "Pron": pron,
@@ -662,7 +659,7 @@ def renderizar_terminal():
                     "Proyección y Auditoría": sesgo_n
                 })
                 filas_nas_mob.append({
-                    "Imp": row['Imp'], "Hora": hora_str, "Noticia": row['title'],
+                    "Imp": row['Imp'], "NY": hora_ny_str, "BO": hora_bol_str, "Noticia": row['title'],
                     "Ant": ant, "Pron": pron, "Real": act, "Proy": sesgo_n
                 })
 
@@ -672,7 +669,8 @@ def renderizar_terminal():
                 sesgo_x = obtener_sesgo_compacto(row, "XAU", ahora)
                 filas_xau.append({
                     "Imp": row['Imp'],
-                    "Hora": hora_str,
+                    "🗽 NY": hora_ny_str,
+                    "🇧🇴 BO": hora_bol_str,
                     "Noticia (USD, CAD, CNY, EUR, JPY, GBP)": titulo_x,
                     "Ant": ant,
                     "Pron": pron,
@@ -680,7 +678,7 @@ def renderizar_terminal():
                     "Proyección y Auditoría": sesgo_x
                 })
                 filas_xau_mob.append({
-                    "Imp": row['Imp'], "Hora": hora_str, "Noticia": titulo_x,
+                    "Imp": row['Imp'], "NY": hora_ny_str, "BO": hora_bol_str, "Noticia": titulo_x,
                     "Ant": ant, "Pron": pron, "Real": act, "Proy": sesgo_x
                 })
 
