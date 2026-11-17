@@ -130,7 +130,7 @@ def obtener_discursos_ff():
                 fore_val = str(ev.get("forecast", "")).strip()
                 
                 if es_discurso or (prev_val == "" and fore_val == ""):
-                    dt_parsed = pd.to_datetime(ev.get("date")).tz_localize('UTC')
+                    dt_parsed = pd.to_datetime(ev.get("date"), utc=True)
                     eventos_ff.append({
                         "date": dt_parsed,
                         "country": mapa_pais_ff[divisa],
@@ -174,7 +174,7 @@ def obtener_datos_mes_rapido(anio, mes, bloque_tiempo):
         datos = res.json()
         if 'result' in datos and datos['result']:
             df_tv = pd.DataFrame(datos['result'])
-            df_tv['date'] = pd.to_datetime(df_tv['date']).dt.tz_localize('UTC')
+            df_tv['date'] = pd.to_datetime(df_tv['date'], utc=True)
             df_tv['es_discurso'] = df_tv['title'].str.lower().str.contains('speaks|speech|testifies|statement|press conference|minutes|fed chair|fomc', na=False)
     except Exception:
         pass
@@ -182,14 +182,20 @@ def obtener_datos_mes_rapido(anio, mes, bloque_tiempo):
 
 def fusionar_calendario_y_discursos(df_tv, anio, mes):
     df_ff = obtener_discursos_ff()
-    if df_ff.empty: return df_tv
+    if df_ff.empty: 
+        return df_tv
     df_ff_mes = df_ff[(df_ff['date'].dt.year == anio) & (df_ff['date'].dt.month == mes)].copy()
-    if df_ff_mes.empty: return df_tv
-    if df_tv.empty: return df_ff_mes
+    if df_ff_mes.empty: 
+        return df_tv
+    if df_tv.empty: 
+        return df_ff_mes
         
     titulos_tv = set(df_tv['title'].str.lower().str.replace('🎙️ ', '', regex=False).str[:15])
     nuevos_ff = df_ff_mes[~df_ff_mes['title'].str.lower().str.replace('🎙️ ', '', regex=False).str[:15].isin(titulos_tv)]
-    return pd.concat([df_tv, nuevos_ff], ignore_index=True)
+    
+    df_res = pd.concat([df_tv, nuevos_ff], ignore_index=True)
+    df_res['date'] = pd.to_datetime(df_res['date'], utc=True)
+    return df_res
 
 # 3. Descarga de Noticias Imprevistas / Breaking News
 @st.cache_data(ttl=120)
@@ -331,7 +337,7 @@ ZONAS_HORARIAS = {
     "Bolivia": {"tz": "America/La_Paz", "bandera": "🇧🇴", "etiqueta": "BO"},
     "Argentina": {"tz": "America/Argentina/Buenos_Aires", "bandera": "🇦🇷", "etiqueta": "AR"},
     "Chile": {"tz": "America/Santiago", "bandera": "🇨🇱", "etiqueta": "CL"},
-    "Colombia / Perú / Ecuador": {"tz": "America/Bogota", "bandera": "🇨🇴", "etiqueta": "CO/PE"},
+    "Colombia / Perú / Ecuador": {"tz": "America/Bogota", "bandera": "🇨🇴", "etiqueta": "CO"},
     "México (CDMX)": {"tz": "America/Mexico_City", "bandera": "🇲🇽", "etiqueta": "MX"},
     "España (Madrid)": {"tz": "Europe/Madrid", "bandera": "🇪🇸", "etiqueta": "ES"},
     "Reino Unido (Londres)": {"tz": "Europe/London", "bandera": "🇬🇧", "etiqueta": "UK"},
@@ -342,12 +348,15 @@ OPCIONES_ZONAS = list(ZONAS_HORARIAS.keys())
 
 tz_utc = pytz.utc
 ahora_utc = datetime.now(tz_utc)
+
+if 'zona_seleccionada' not in st.session_state: 
+    st.session_state.zona_seleccionada = "Bolivia"
+    
 if 'fecha_seleccionada' not in st.session_state:
-    st.session_state.fecha_seleccionada = ahora_utc.astimezone(pytz.timezone(ZONAS_HORARIAS["Bolivia"]["tz"])).date()
+    st.session_state.fecha_seleccionada = ahora_utc.astimezone(pytz.timezone(ZONAS_HORARIAS[st.session_state.zona_seleccionada]["tz"])).date()
 if 'mes_vista' not in st.session_state: st.session_state.mes_vista = st.session_state.fecha_seleccionada.month
 if 'anio_vista' not in st.session_state: st.session_state.anio_vista = st.session_state.fecha_seleccionada.year
 if 'modo_francotirador' not in st.session_state: st.session_state.modo_francotirador = False
-if 'zona_seleccionada' not in st.session_state: st.session_state.zona_seleccionada = "Bolivia"
 
 def calcular_intervalo_refresco(df_hoy, ahora_utc):
     if df_hoy.empty: return 180, False
