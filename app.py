@@ -7,7 +7,7 @@ import pytz
 import html
 
 # --- 1. CONFIGURACIÓN Y METADATOS ---
-VERSION_APP = "1.5.1"
+VERSION_APP = "1.5.4"
 AUTOR = "Richard Rocha"
 
 st.set_page_config(
@@ -57,12 +57,14 @@ st.markdown("""
 
         /* Guía y pie de página */
         .footer-info { text-align: center; color: #6B7280; font-size: 0.85rem; margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #374151; }
+        
+        /* Alinear Botón Actualizar PC */
+        div[data-testid="column"]:last-child div.stButton { margin-top: 28px; }
 
         /* RESPONSIVIDAD */
         @media (min-width: 769px) {
             div[data-testid="stVerticalBlock"]:has(> div.element-container .marker-movil) { display: none !important; }
             div[data-testid="stVerticalBlock"]:has(> div.element-container .marker-pc) div[data-testid="column"] button { height: 68px !important; padding: 4px !important; line-height: 1.25 !important; font-size: 0.82rem !important; }
-            /* Ocultar botón flotante en PC */
             div.flotante-btn { display: none !important; }
         }
         @media (max-width: 768px) {
@@ -70,11 +72,9 @@ st.markdown("""
             div[data-testid="stVerticalBlock"]:has(> div.element-container .marker-pc) { display: none !important; }
             .ticker-wrap { padding: 7px 0; margin-bottom: 10px; }
             .ticker-item { font-size: 0.84rem; padding: 0 18px; }
+            div[data-testid="column"]:last-child div.stButton { margin-top: 0px; }
             
-            /* Botón Flotante Celular */
-            div.flotante-btn {
-                position: fixed; bottom: 80px; right: 20px; z-index: 99999;
-            }
+            div.flotante-btn { position: fixed; bottom: 80px; right: 20px; z-index: 99999; }
             div.flotante-btn button {
                 width: 55px !important; height: 55px !important; border-radius: 50% !important;
                 background-color: #3B82F6 !important; color: white !important;
@@ -88,7 +88,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# --- 2. DICCIONARIO DE TRADUCCIÓN AMPLIADO ---
+# --- 2. DICCIONARIO DE TRADUCCIÓN ---
 DICCIONARIO_TRADUCCION = {
     "Speaks": "Habla", "Member": "Miembro", "Balance of Trade": "Balanza Comercial",
     "Crude Oil Stock Change": "Cambio Inv. Crudo", "Unemployment Rate": "Tasa de Desempleo",
@@ -118,11 +118,11 @@ DICCIONARIO_TRADUCCION = {
 }
 
 def traducir_texto(texto, activo=True):
-    if not activo or not texto: return texto
+    if not activo or not texto: 
+        return texto
     for ing, esp in DICCIONARIO_TRADUCCION.items():
         texto = texto.replace(ing, esp).replace(ing.upper(), esp.upper())
     return texto
-
 
 # --- 3. DESCARGA DE DATOS ---
 def obtener_discursos_ff():
@@ -131,7 +131,6 @@ def obtener_discursos_ff():
     if 'ff_cache_df' in st.session_state and 'ff_cache_time' in st.session_state:
         if not st.session_state.ff_cache_df.empty and (ahora - st.session_state.ff_cache_time).total_seconds() < 1200:
             return st.session_state.ff_cache_df
-
     url = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
     headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
     eventos_ff = []
@@ -170,11 +169,9 @@ def obtener_datos_mes_rapido(anio, mes, bloque_tiempo):
     ultimo_dia_num = calendar.monthrange(anio, mes)[1]
     inicio_utc = (datetime.combine(primer_dia, datetime.min.time()) - timedelta(days=1)).strftime('%Y-%m-%dT00:00:00.000Z')
     fin_utc = (datetime.combine(date(anio, mes, ultimo_dia_num), datetime.max.time()) + timedelta(days=1)).strftime('%Y-%m-%dT23:59:59.000Z')
-    
     url = "https://economic-calendar.tradingview.com/events"
     params = {"from": inicio_utc, "to": fin_utc, "countries": "US,CA,CN,EU,JP,GB"}
     headers = {"Origin": "https://www.tradingview.com", "User-Agent": "Mozilla/5.0"}
-    
     df_tv = pd.DataFrame()
     try:
         res = requests.get(url, params=params, headers=headers, timeout=10)
@@ -205,7 +202,6 @@ def obtener_breaking_news(api_key):
     excluir = ['bitcoin', 'btc', 'crypto', 'ethereum', 'solana', 'dogecoin', 'memecoin', 'nft']
     kw_xau = ['gold', 'xau', 'bullion', 'fed', 'powell', 'warsh', 'fomc', 'inflation', 'cpi', 'tariff', 'war', 'missile', 'iran', 'israel', 'china', 'central bank', 'treasury', 'yield', 'dollar', 'dxy', 'recession']
     kw_nas = ['nasdaq', 'tech', 'nvidia', 'apple', 'microsoft', 'semiconductor', 'fed', 'powell', 'warsh', 'fomc', 'interest rate', 'inflation', 'cpi', 'jobs', 'recession', 'treasury', 'yield', 'tariff']
-    
     noticias_filtradas = []
     try:
         res = requests.get(url, timeout=8)
@@ -244,7 +240,9 @@ def obtener_sesgo_compacto(fila, activo, ahora_utc):
     actual, pronostico, anterior = fila.get('actual'), fila.get('forecast'), fila.get('previous')
     es_discurso = fila.get('es_discurso', False)
     if es_discurso and pd.isna(actual):
-        return "🎙️ Discurso realizado (Revisar tono Hawkish/Dovish)" if pd.notna(fila.get('date')) and fila.get('date') <= ahora_utc else "🎙️ Pendiente (Alta volatilidad en vivo)"
+        if pd.notna(fila.get('date')) and fila.get('date') <= ahora_utc:
+            return "🎙️ Discurso realizado (Revisar tono Hawkish/Dovish)"
+        return "🎙️ Pendiente (Alta volatilidad en vivo)"
 
     es_extranjera = (fila.get('country', 'US') in ['CA', 'CN', 'EU', 'JP', 'GB'])
     tiene_actual, tiene_pron, tiene_ant = pd.notna(actual), pd.notna(pronostico), pd.notna(anterior)
@@ -323,7 +321,8 @@ def calcular_intervalo_refresco(df_hoy, ahora_utc):
     if df_hoy.empty: return 180, False
     for _, r in df_hoy.iterrows():
         diff_segundos = (r['date'] - ahora_utc).total_seconds()
-        if not r.get('es_discurso', False) and pd.isna(r.get('actual')) and -300 <= diff_segundos <= 120: return 10, True
+        if not r.get('es_discurso', False) and pd.isna(r.get('actual')) and -300 <= diff_segundos <= 120: 
+            return 10, True
     return 180, False
 
 # --- 6. RENDERIZADO PRINCIPAL ---
@@ -331,17 +330,25 @@ def calcular_intervalo_refresco(df_hoy, ahora_utc):
 def renderizar_terminal():
     tz_ny = pytz.timezone('America/New_York')
     tz_sel = pytz.timezone(ZONAS_HORARIAS[st.session_state.zona_seleccionada]["tz"])
-    bandera_sel, etiqueta_sel = ZONAS_HORARIAS[st.session_state.zona_seleccionada]["bandera"], ZONAS_HORARIAS[st.session_state.zona_seleccionada]["etiqueta"]
+    bandera_sel = ZONAS_HORARIAS[st.session_state.zona_seleccionada]["bandera"]
+    etiqueta_sel = ZONAS_HORARIAS[st.session_state.zona_seleccionada]["etiqueta"]
     
     ahora_utc = datetime.now(pytz.utc)
-    ahora_ny, ahora_sel = ahora_utc.astimezone(tz_ny), ahora_utc.astimezone(tz_sel)
+    ahora_ny = ahora_utc.astimezone(tz_ny)
+    ahora_sel = ahora_utc.astimezone(tz_sel)
     hoy_sel_date = ahora_sel.date()
     
     bloque_tiempo = int(ahora_utc.timestamp() // (10 if st.session_state.modo_francotirador else 180))
     df_mes = fusionar_calendario_y_discursos(obtener_datos_mes_rapido(st.session_state.anio_vista, st.session_state.mes_vista, bloque_tiempo), st.session_state.anio_vista, st.session_state.mes_vista)
     df_actual = fusionar_calendario_y_discursos(obtener_datos_mes_rapido(hoy_sel_date.year, hoy_sel_date.month, bloque_tiempo), hoy_sel_date.year, hoy_sel_date.month)
     
-    st.session_state.modo_francotirador = calcular_intervalo_refresco(df_actual[df_actual['date'].dt.tz_convert(tz_sel).dt.date == hoy_sel_date], ahora_utc)[1] if not df_actual.empty else False
+    if not df_actual.empty:
+        df_hoy_solo = df_actual[df_actual['date'].dt.tz_convert(tz_sel).dt.date == hoy_sel_date]
+        _, activar_sniper = calcular_intervalo_refresco(df_hoy_solo, ahora_utc)
+        st.session_state.modo_francotirador = activar_sniper
+    else:
+        st.session_state.modo_francotirador = False
+
     breaking_news = obtener_breaking_news(FINNHUB_API_KEY)
     traductor_on = st.session_state.activar_traductor
     
@@ -358,44 +365,70 @@ def renderizar_terminal():
             if not (es_nas or es_xau): continue
             imp_ico = "🔴" if r.get('importance') == 1 else "🟠" if r.get('importance') == 0 else "🟡"
             activos_html = ('<span class="badge-nas">NAS100</span> ' if es_nas else '') + ('<span class="badge-xau">XAUUSD</span> ' if es_xau else '')
-            items_ticker.append(f'<div class="ticker-item">{imp_ico} <b>🗽{r["date"].astimezone(tz_ny).strftime("%H:%M")} | {bandera_sel}{r["date"].astimezone(tz_sel).strftime("%H:%M")}</b> | {activos_html} <b>{html.escape(traducir_texto(str(r["title"]), traductor_on))}</b> — Ant: <code>{formatear_num(r.get("previous"))}</code> | Pron: <code>{formatear_num(r.get("forecast"))}</code> | Real: <code>{formatear_num(r.get("actual"))}</code> → <b>{html.escape(obtener_sesgo_compacto(r, "XAU" if es_xau else "NAS", ahora_utc))}</b></div>')
+            
+            items_ticker.append(
+                f'<div class="ticker-item">{imp_ico} <b>🗽{r["date"].astimezone(tz_ny).strftime("%H:%M")} | {bandera_sel}{r["date"].astimezone(tz_sel).strftime("%H:%M")}</b> | {activos_html} <b>{html.escape(traducir_texto(str(r["title"]), traductor_on))}</b> — Ant: <code>{formatear_num(r.get("previous"))}</code> | Pron: <code>{formatear_num(r.get("forecast"))}</code> | Real: <code>{formatear_num(r.get("actual"))}</code> → <b>{html.escape(obtener_sesgo_compacto(r, "XAU" if es_xau else "NAS", ahora_utc))}</b></div>'
+            )
 
-    st.markdown(f'<div class="ticker-wrap"><div class="ticker-move">{"".join(items_ticker) if items_ticker else "<div class=ticker-item>📡 Monitoreando mercados en vivo...</div>"}</div></div>', unsafe_allow_html=True)
+    if items_ticker:
+        st.markdown(f'<div class="ticker-wrap"><div class="ticker-move">{"".join(items_ticker)}</div></div>', unsafe_allow_html=True)
+    else:
+        st.markdown('<div class="ticker-wrap"><div class="ticker-move"><div class="ticker-item">📡 Monitoreando mercados en vivo... Sin eventos próximos.</div></div></div>', unsafe_allow_html=True)
 
     # --- ENCABEZADO DE FECHA Y FILTROS ---
     f_sel = st.session_state.fecha_seleccionada
     estado_radar = "⚡ EN VIVO (10s)" if st.session_state.modo_francotirador else "🟢 Normal (3m)"
     
-    c_tit_dia, c_check_ruido, c_trad, c_filtro_imp, c_tz, c_btn_pc = st.columns([3.2, 1.4, 0.9, 1.2, 1.4, 1.0])
-    with c_tit_dia: st.subheader(f"📋 {f_sel.strftime('%d/%m/%Y')} | 🗽 NY {ahora_ny.strftime('%H:%M')} • {bandera_sel} {etiqueta_sel} {ahora_sel.strftime('%H:%M')} | {estado_radar}")
-    with c_check_ruido: st.write(""); filtro_estricto = st.checkbox("🛡️ Ocultar letras/agrícolas", value=False)
+    # 6 Columnas arriba
+    c_tit_dia, c_check_ruido, c_trad, c_filtro_imp, c_tz, c_btn_pc = st.columns([3.5, 1.4, 0.9, 1.2, 1.4, 0.8])
+    
+    with c_tit_dia: 
+        st.subheader(f"📋 {f_sel.strftime('%d/%m/%Y')} | 🗽 NY {ahora_ny.strftime('%H:%M')} • {bandera_sel} {etiqueta_sel} {ahora_sel.strftime('%H:%M')} | {estado_radar}")
+    
+    with c_check_ruido: 
+        st.write("")
+        filtro_estricto = st.checkbox("🛡️ Ocultar letras/agrícolas", value=False)
+        
     with c_trad: 
         st.write("")
-        if st.checkbox("🇪🇸 Traducir", value=st.session_state.activar_traductor) != st.session_state.activar_traductor:
-            st.session_state.activar_traductor = not st.session_state.activar_traductor; st.rerun()
-    with c_filtro_imp: filtro_imp = st.multiselect("Impacto:", options=["Alto", "Medio", "Bajo"], default=["Alto", "Medio", "Bajo"], label_visibility="collapsed")
+        nueva_traduccion = st.checkbox("🇪🇸 Traducir", value=st.session_state.activar_traductor)
+        if nueva_traduccion != st.session_state.activar_traductor:
+            st.session_state.activar_traductor = nueva_traduccion
+            st.rerun()
+            
+    with c_filtro_imp: 
+        filtro_imp = st.multiselect("Impacto:", options=["Alto", "Medio", "Bajo"], default=["Alto", "Medio", "Bajo"], label_visibility="collapsed")
+        
     with c_tz:
         nueva_zona = st.selectbox("🌍 Zona:", options=OPCIONES_ZONAS, index=OPCIONES_ZONAS.index(st.session_state.zona_seleccionada), label_visibility="collapsed")
-        if nueva_zona != st.session_state.zona_seleccionada: st.session_state.zona_seleccionada = nueva_zona; st.rerun()
+        if nueva_zona != st.session_state.zona_seleccionada: 
+            st.session_state.zona_seleccionada = nueva_zona
+            st.rerun()
+            
     with c_btn_pc:
         st.markdown('<div class="solo-pc">', unsafe_allow_html=True)
         if st.button("🔄 Actualizar", key="pc_sync_btn", use_container_width=True):
-            st.cache_data.clear(); st.rerun()
+            st.cache_data.clear()
+            st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # --- TABLAS DE NOTICIAS ---
+    # --- PROCESAMIENTO DE TABLAS ---
     if not df_mes.empty:
         df_dia = df_mes[df_mes['date'].dt.tz_convert(tz_sel).dt.date == f_sel].copy()
         df_dia['imp_texto'] = df_dia['importance'].map({1: "Alto", 0: "Medio", -1: "Bajo"})
         df_dia['Imp'] = df_dia['importance'].map({1: "🔴", 0: "🟠", -1: "🟡"})
         df_dia = df_dia[df_dia['imp_texto'].isin(filtro_imp)].sort_values(by='date', ascending=False)
 
-        filas_nas, filas_xau, filas_nas_mob, filas_xau_mob = [], [], [], []
+        filas_nas, filas_xau = [], []
+        filas_nas_mob, filas_xau_mob = [], []
         banderas = {"US": "🇺🇸", "CA": "🇨🇦", "CN": "🇨🇳", "EU": "🇪🇺", "JP": "🇯🇵", "GB": "🇬🇧"}
         
         for _, r in df_dia.iterrows():
-            ny_str, sel_str = r['date'].astimezone(tz_ny).strftime('%H:%M'), r['date'].astimezone(tz_sel).strftime('%H:%M')
-            ant, pron, act = formatear_num(r.get('previous')), formatear_num(r.get('forecast')), formatear_num(r.get('actual'))
+            ny_str = r['date'].astimezone(tz_ny).strftime('%H:%M')
+            sel_str = r['date'].astimezone(tz_sel).strftime('%H:%M')
+            ant = formatear_num(r.get('previous'))
+            pron = formatear_num(r.get('forecast'))
+            act = formatear_num(r.get('actual'))
 
             if es_relevante_nas100(r, filtro_estricto):
                 tit = traducir_texto(r['title'], traductor_on)
@@ -409,62 +442,99 @@ def renderizar_terminal():
                 filas_xau.append({"Imp": r['Imp'], "🗽 NY": ny_str, f"{bandera_sel} {etiqueta_sel}": sel_str, "Noticia (Global)": tit_x, "Ant": ant, "Pron": pron, "Real": act, "Proyección": proy_x})
                 filas_xau_mob.append({"Imp": r['Imp'], "NY": ny_str, etiqueta_sel: sel_str, "Noticia": tit_x, "Ant": ant, "Pron": pron, "Real": act, "Proy": proy_x})
 
-        # PC
+        # --- BLOQUE PC (Tablas + Calendario de botones) ---
         with st.container():
             st.markdown('<span class="marker-pc"></span>', unsafe_allow_html=True)
             col_n, col_x = st.columns(2, gap="medium")
             with col_n: 
                 st.markdown("#### 🇺🇸 NAS100")
-                if filas_nas: st.dataframe(pd.DataFrame(filas_nas), use_container_width=True, hide_index=True)
-                else: st.info("Sin eventos programados.")
+                if filas_nas:
+                    st.dataframe(pd.DataFrame(filas_nas), use_container_width=True, hide_index=True)
+                else:
+                    st.info("Sin eventos programados para NAS100.")
+                    
             with col_x: 
                 st.markdown("#### 🪙 XAUUSD")
-                if filas_xau: st.dataframe(pd.DataFrame(filas_xau), use_container_width=True, hide_index=True)
-                else: st.info("Sin eventos programados.")
+                if filas_xau:
+                    st.dataframe(pd.DataFrame(filas_xau), use_container_width=True, hide_index=True)
+                else:
+                    st.info("Sin eventos programados para XAUUSD.")
+            
+            st.markdown("---")
+            meses_es = ["", "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"]
+            c_p, c_m, c_n, c_h = st.columns([1, 4, 1, 1.5])
+            
+            with c_p:
+                if st.button("◀ Mes Ant.", use_container_width=True): 
+                    if st.session_state.mes_vista == 1:
+                        st.session_state.mes_vista = 12
+                        st.session_state.anio_vista -= 1
+                    else:
+                        st.session_state.mes_vista -= 1
+                    st.rerun()
+            with c_m: 
+                st.markdown(f"<h3 style='text-align:center; margin:0;'>📅 {meses_es[st.session_state.mes_vista]} {st.session_state.anio_vista}</h3>", unsafe_allow_html=True)
+            with c_n:
+                if st.button("Mes Sig. ▶", use_container_width=True): 
+                    if st.session_state.mes_vista == 12:
+                        st.session_state.mes_vista = 1
+                        st.session_state.anio_vista += 1
+                    else:
+                        st.session_state.mes_vista += 1
+                    st.rerun()
+            with c_h:
+                if st.button("📍 Ir a Hoy", use_container_width=True): 
+                    st.session_state.fecha_seleccionada = hoy_sel_date
+                    st.session_state.mes_vista = hoy_sel_date.month
+                    st.session_state.anio_vista = hoy_sel_date.year
+                    st.rerun()
+
+            resumen_dias = {}
+            for f in df_mes['date'].dt.tz_convert(tz_sel).dt.date.unique():
+                f_nas = len(df_mes[(df_mes['date'].dt.tz_convert(tz_sel).dt.date == f) & df_mes.apply(es_relevante_nas100, axis=1)]) > 0
+                f_xau = len(df_mes[(df_mes['date'].dt.tz_convert(tz_sel).dt.date == f) & df_mes.apply(es_relevante_xauusd, axis=1)]) > 0
+                f_imp = df_mes[df_mes['date'].dt.tz_convert(tz_sel).dt.date == f]['importance'].max()
+                resumen_dias[f] = {"nas": f_nas, "xau": f_xau, "imp": f_imp}
+            
+            cols_h = st.columns(7)
+            for i, d in enumerate(["LUN", "MAR", "MIÉ", "JUE", "VIE", "SÁB", "DOM"]): 
+                cols_h[i].markdown(f"<div class='{'cal-header-wknd' if i>=5 else 'cal-header'}'>{d}</div>", unsafe_allow_html=True)
+                
+            for sem in calendar.monthcalendar(st.session_state.anio_vista, st.session_state.mes_vista):
+                cols_s = st.columns(7)
+                for i, d in enumerate(sem):
+                    with cols_s[i]:
+                        if d != 0:
+                            fc = date(st.session_state.anio_vista, st.session_state.mes_vista, d)
+                            info = resumen_dias.get(fc, {"nas": False, "xau": False, "imp": -1})
+                            mrc = " ".join([m for cond, m in [(info["nas"], "🇺🇸"), (info["xau"], "🪙")] if cond])
+                            dot = '🔴' if info['imp']==1 else '🟠' if info['imp']==0 else ''
+                            hoy_mar = '📍' if fc == hoy_sel_date else ''
+                            tipo_btn = "primary" if fc == f_sel else "secondary"
+                            
+                            if st.button(f"{hoy_mar}{d} {dot}\n{mrc if mrc else 'Sin eventos'}", key=f"pc_dia_{fc}", type=tipo_btn, use_container_width=True):
+                                st.session_state.fecha_seleccionada = fc
+                                st.rerun()
         
-        # MÓVIL
+        # --- BLOQUE MÓVIL (Selector de fecha compacto + Tarjetas) ---
         with st.container():
             st.markdown('<span class="marker-movil"></span>', unsafe_allow_html=True)
+            nueva_f_mob = st.date_input("📅 Seleccionar Fecha:", value=f_sel, format="DD/MM/YYYY", key="mob_date")
+            if nueva_f_mob != f_sel: 
+                st.session_state.fecha_seleccionada = nueva_f_mob
+                st.session_state.mes_vista = nueva_f_mob.month
+                st.session_state.anio_vista = nueva_f_mob.year
+                st.rerun()
+                
             tab_n, tab_x = st.tabs([f"🇺🇸 NAS100 ({len(filas_nas_mob)})", f"🪙 XAUUSD ({len(filas_xau_mob)})"])
-            with tab_n: st.markdown(construir_tarjetas_movil(filas_nas_mob, etiqueta_sel, bandera_sel), unsafe_allow_html=True)
-            with tab_x: st.markdown(construir_tarjetas_movil(filas_xau_mob, etiqueta_sel, bandera_sel), unsafe_allow_html=True)
+            with tab_n: 
+                st.markdown(construir_tarjetas_movil(filas_nas_mob, etiqueta_sel, bandera_sel), unsafe_allow_html=True)
+            with tab_x: 
+                st.markdown(construir_tarjetas_movil(filas_xau_mob, etiqueta_sel, bandera_sel), unsafe_allow_html=True)
+
     else:
         st.warning("No se encontraron datos para el mes seleccionado.")
 
-    # --- CALENDARIO MÓVIL (Nativo) ---
-    st.markdown('<div class="solo-celular">', unsafe_allow_html=True)
-    nueva_f = st.date_input("📅 Cambiar fecha:", value=f_sel, format="DD/MM/YYYY", key="mob_date")
-    if nueva_f != f_sel: st.session_state.fecha_seleccionada = nueva_f; st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    # --- CALENDARIO PC (Botones) ---
-    st.markdown('<div class="solo-pc">', unsafe_allow_html=True)
-    st.markdown("---")
-    meses_es = ["", "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"]
-    c_p, c_m, c_n, c_h = st.columns([1, 4, 1, 1.5])
-    with c_p:
-        if st.button("◀ Mes Ant.", use_container_width=True): st.session_state.mes_vista = 12 if st.session_state.mes_vista == 1 else st.session_state.mes_vista - 1; st.rerun()
-    with c_m: st.markdown(f"<h3 style='text-align:center; margin:0;'>📅 {meses_es[st.session_state.mes_vista]} {st.session_state.anio_vista}</h3>", unsafe_allow_html=True)
-    with c_n:
-        if st.button("Mes Sig. ▶", use_container_width=True): st.session_state.mes_vista = 1 if st.session_state.mes_vista == 12 else st.session_state.mes_vista + 1; st.rerun()
-    with c_h:
-        if st.button("📍 Ir a Hoy", use_container_width=True): st.session_state.fecha_seleccionada, st.session_state.mes_vista = hoy_sel_date, hoy_sel_date.month; st.rerun()
-
-    resumen_dias = {f: {"nas": len(df_mes[(df_mes['date'].dt.tz_convert(tz_sel).dt.date == f) & df_mes.apply(lambda r: es_relevante_nas100(r), axis=1)]) > 0, "xau": len(df_mes[(df_mes['date'].dt.tz_convert(tz_sel).dt.date == f) & df_mes.apply(lambda r: es_relevante_xauusd(r), axis=1)]) > 0, "imp": df_mes[df_mes['date'].dt.tz_convert(tz_sel).dt.date == f]['importance'].max()} for f in df_mes['date'].dt.tz_convert(tz_sel).dt.date.unique()} if not df_mes.empty else {}
-    
-    cols_h = st.columns(7)
-    for i, d in enumerate(["LUN", "MAR", "MIÉ", "JUE", "VIE", "SÁB", "DOM"]): cols_h[i].markdown(f"<div class='{'cal-header-wknd' if i>=5 else 'cal-header'}'>{d}</div>", unsafe_allow_html=True)
-    for sem in calendar.monthcalendar(st.session_state.anio_vista, st.session_state.mes_vista):
-        cols_s = st.columns(7)
-        for i, d in enumerate(sem):
-            with cols_s[i]:
-                if d != 0:
-                    fc = date(st.session_state.anio_vista, st.session_state.mes_vista, d)
-                    info = resumen_dias.get(fc, {"nas": False, "xau": False, "imp": -1})
-                    mrc = " ".join([m for cond, m in [(info["nas"], "🇺🇸"), (info["xau"], "🪙")] if cond])
-                    if st.button(f"{'📍' if fc == hoy_sel_date else ''}{d} {'🔴' if info['imp']==1 else '🟠' if info['imp']==0 else ''}\n{mrc}", key=f"pc_dia_{fc}", type="primary" if fc == f_sel else "secondary", use_container_width=True):
-                        st.session_state.fecha_seleccionada = fc; st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
 
     # --- RADAR BREAKING NEWS ---
     st.markdown("---")
@@ -475,25 +545,31 @@ def renderizar_terminal():
             tag = " | ".join([t for t, c in [("🇺🇸 NAS100", bn['nas']), ("🪙 XAUUSD", bn['xau'])] if c])
             with cols_bn[idx % 2]:
                 with st.container(border=True):
-                    st.markdown(f"**`🗽{bn['fecha_dt'].astimezone(tz_ny).strftime('%H:%M')} | {bandera_sel}{bn['fecha_dt'].astimezone(tz_sel).strftime('%H:%M')}` | {tag} | _{bn['fuente']}_**")
-                    st.markdown(f"**[{traducir_texto(bn['titulo'], traductor_on)}]({bn['url']})**")
-    else: st.info("Sin titulares imprevistos recientes.")
+                    hora_n = bn['fecha_dt'].astimezone(tz_ny).strftime('%H:%M')
+                    hora_s = bn['fecha_dt'].astimezone(tz_sel).strftime('%H:%M')
+                    tit = traducir_texto(bn['titulo'], traductor_on)
+                    st.markdown(f"**`🗽{hora_n} | {bandera_sel}{hora_s}` | {tag} | _{bn['fuente']}_**")
+                    st.markdown(f"**[{tit}]({bn['url']})**")
+    else: 
+        st.info("Sin titulares imprevistos recientes.")
 
     # --- BOTÓN FLOTANTE CELULAR ---
     st.markdown('<div class="flotante-btn">', unsafe_allow_html=True)
     if st.button("🔄", key="btn_flotante_sync"):
-        st.cache_data.clear(); st.rerun()
+        st.cache_data.clear()
+        st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # --- GUÍA, VERSIÓN Y CONTADOR ---
+    # --- GUÍA Y CONTADOR ---
     st.markdown("---")
     with st.expander("📖 Guía de Uso del Terminal Macro"):
         st.markdown(f"""
         **Terminal Macro v{VERSION_APP}** - Creado por **{AUTOR}**
         
-        *   **Radar Normal (3m) / EN VIVO (10s):** El panel consulta el calendario económico automáticamente cada 3 minutos. Si detecta que faltan 2 minutos para una noticia, entra en "Modo Francotirador" y se actualiza cada 10 segundos para traerte el dato real al instante.
-        *   **Botón Traducir:** Actívalo para convertir automáticamente los términos financieros del inglés al español.
-        *   **Filtros Inteligentes:** El panel izquierdo (NAS100) limpia el ruido mundial y solo muestra datos de EE.UU. que muevan tecnología. El panel derecho (XAUUSD) muestra datos de EE.UU. más los países del G7 que impactan la liquidez global (China, Europa, Reino Unido, Canadá y Japón).
+        *   **Radar Normal (3m) / EN VIVO (10s):** El panel consulta el calendario económico automáticamente cada 3 minutos. Si detecta que faltan 2 minutos para una noticia, entra en "Modo Francotirador" y se actualiza cada 10 segundos para traerte el dato real al instante sin tocar nada.
+        *   **Filtros Inteligentes:** El panel izquierdo (NAS100) limpia el ruido y solo muestra datos de EE.UU. que muevan tecnología. El panel derecho (XAUUSD) muestra datos de EE.UU. más los países del G7 que impactan la liquidez global y el valor del Oro (China, Europa, Reino Unido, Canadá y Japón).
+        *   **Botón Traducir:** Actívalo para convertir automáticamente los términos financieros del inglés al español, diseñado específicamente para traders.
+        *   **Selector de Zona Horaria:** Cambia entre Bolivia, Argentina, España, etc. El reloj de Nueva York (`🗽 NY`) siempre se mantendrá fijo como referencia global de apertura bursátil.
         *   **Auditoría de Proyección:** Compara el dato Real con el Pronóstico y el Anterior, dictando instantáneamente si el resultado es `ALCISTA` o `BAJISTA` para el activo correspondiente.
         """)
         
