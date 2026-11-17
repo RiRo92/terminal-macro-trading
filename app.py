@@ -7,11 +7,11 @@ import pytz
 import html
 
 # --- 1. CONFIGURACIÓN Y METADATOS ---
-VERSION_APP = "1.5.4"
+VERSION_APP = "1.6.0"
 AUTOR = "Richard Rocha"
 
 st.set_page_config(
-    page_title=f"Terminal Macro v{VERSION_APP}", 
+    page_title=f"TERMINAL DE NOTICIAS v{VERSION_APP}", 
     layout="wide", 
     initial_sidebar_state="collapsed"
 )
@@ -65,6 +65,7 @@ st.markdown("""
         @media (min-width: 769px) {
             div[data-testid="stVerticalBlock"]:has(> div.element-container .marker-movil) { display: none !important; }
             div[data-testid="stVerticalBlock"]:has(> div.element-container .marker-pc) div[data-testid="column"] button { height: 68px !important; padding: 4px !important; line-height: 1.25 !important; font-size: 0.82rem !important; }
+            /* Ocultar botón flotante en PC */
             div.flotante-btn { display: none !important; }
         }
         @media (max-width: 768px) {
@@ -74,21 +75,24 @@ st.markdown("""
             .ticker-item { font-size: 0.84rem; padding: 0 18px; }
             div[data-testid="column"]:last-child div.stButton { margin-top: 0px; }
             
-            div.flotante-btn { position: fixed; bottom: 80px; right: 20px; z-index: 99999; }
+            /* Botón Flotante Celular */
+            div.flotante-btn {
+                position: fixed; bottom: 80px; right: 20px; z-index: 99999;
+            }
             div.flotante-btn button {
                 width: 55px !important; height: 55px !important; border-radius: 50% !important;
                 background-color: #3B82F6 !important; color: white !important;
                 border: 2px solid #60A5FA !important; box-shadow: 0 4px 12px rgba(0,0,0,0.5) !important;
                 font-size: 24px !important; display: flex !important; align-items: center !important; justify-content: center !important; padding: 0 !important;
             }
-            div.flotante-btn button p { display: none !important; }
-            div.flotante-btn button::after { content: "🔄"; }
+            div.flotante-btn button p { display: none !important; } /* Ocultar texto */
+            div.flotante-btn button::after { content: "🔄"; } /* Mostrar solo ícono */
         }
     </style>
 """, unsafe_allow_html=True)
 
 
-# --- 2. DICCIONARIO DE TRADUCCIÓN ---
+# --- 2. DICCIONARIO DE TRADUCCIÓN AMPLIADO ---
 DICCIONARIO_TRADUCCION = {
     "Speaks": "Habla", "Member": "Miembro", "Balance of Trade": "Balanza Comercial",
     "Crude Oil Stock Change": "Cambio Inv. Crudo", "Unemployment Rate": "Tasa de Desempleo",
@@ -124,6 +128,7 @@ def traducir_texto(texto, activo=True):
         texto = texto.replace(ing, esp).replace(ing.upper(), esp.upper())
     return texto
 
+
 # --- 3. DESCARGA DE DATOS ---
 def obtener_discursos_ff():
     tz_utc = pytz.utc
@@ -131,6 +136,7 @@ def obtener_discursos_ff():
     if 'ff_cache_df' in st.session_state and 'ff_cache_time' in st.session_state:
         if not st.session_state.ff_cache_df.empty and (ahora - st.session_state.ff_cache_time).total_seconds() < 1200:
             return st.session_state.ff_cache_df
+
     url = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
     headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
     eventos_ff = []
@@ -321,8 +327,7 @@ def calcular_intervalo_refresco(df_hoy, ahora_utc):
     if df_hoy.empty: return 180, False
     for _, r in df_hoy.iterrows():
         diff_segundos = (r['date'] - ahora_utc).total_seconds()
-        if not r.get('es_discurso', False) and pd.isna(r.get('actual')) and -300 <= diff_segundos <= 120: 
-            return 10, True
+        if not r.get('es_discurso', False) and pd.isna(r.get('actual')) and -300 <= diff_segundos <= 120: return 10, True
     return 180, False
 
 # --- 6. RENDERIZADO PRINCIPAL ---
@@ -330,12 +335,10 @@ def calcular_intervalo_refresco(df_hoy, ahora_utc):
 def renderizar_terminal():
     tz_ny = pytz.timezone('America/New_York')
     tz_sel = pytz.timezone(ZONAS_HORARIAS[st.session_state.zona_seleccionada]["tz"])
-    bandera_sel = ZONAS_HORARIAS[st.session_state.zona_seleccionada]["bandera"]
-    etiqueta_sel = ZONAS_HORARIAS[st.session_state.zona_seleccionada]["etiqueta"]
+    bandera_sel, etiqueta_sel = ZONAS_HORARIAS[st.session_state.zona_seleccionada]["bandera"], ZONAS_HORARIAS[st.session_state.zona_seleccionada]["etiqueta"]
     
     ahora_utc = datetime.now(pytz.utc)
-    ahora_ny = ahora_utc.astimezone(tz_ny)
-    ahora_sel = ahora_utc.astimezone(tz_sel)
+    ahora_ny, ahora_sel = ahora_utc.astimezone(tz_ny), ahora_utc.astimezone(tz_sel)
     hoy_sel_date = ahora_sel.date()
     
     bloque_tiempo = int(ahora_utc.timestamp() // (10 if st.session_state.modo_francotirador else 180))
@@ -562,15 +565,36 @@ def renderizar_terminal():
 
     # --- GUÍA Y CONTADOR ---
     st.markdown("---")
-    with st.expander("📖 Guía de Uso del Terminal Macro"):
+    with st.expander("📖 Guía de Uso del TERMINAL DE NOTICIAS"):
         st.markdown(f"""
-        **Terminal Macro v{VERSION_APP}** - Creado por **{AUTOR}**
-        
-        *   **Radar Normal (3m) / EN VIVO (10s):** El panel consulta el calendario económico automáticamente cada 3 minutos. Si detecta que faltan 2 minutos para una noticia, entra en "Modo Francotirador" y se actualiza cada 10 segundos para traerte el dato real al instante sin tocar nada.
-        *   **Filtros Inteligentes:** El panel izquierdo (NAS100) limpia el ruido y solo muestra datos de EE.UU. que muevan tecnología. El panel derecho (XAUUSD) muestra datos de EE.UU. más los países del G7 que impactan la liquidez global y el valor del Oro (China, Europa, Reino Unido, Canadá y Japón).
-        *   **Botón Traducir:** Actívalo para convertir automáticamente los términos financieros del inglés al español, diseñado específicamente para traders.
-        *   **Selector de Zona Horaria:** Cambia entre Bolivia, Argentina, España, etc. El reloj de Nueva York (`🗽 NY`) siempre se mantendrá fijo como referencia global de apertura bursátil.
-        *   **Auditoría de Proyección:** Compara el dato Real con el Pronóstico y el Anterior, dictando instantáneamente si el resultado es `ALCISTA` o `BAJISTA` para el activo correspondiente.
+        **TERMINAL DE NOTICIAS v{VERSION_APP}** - Creado por **{AUTOR}**
+
+        ### ⚙️ Funciones Principales
+        *   **Radar Normal (3m) / ⚡ EN VIVO (10s):** El panel consulta el calendario automáticamente cada 3 minutos. Faltando 2 minutos para una noticia, entra en "Modo Francotirador" (10s) para darte el dato real al instante.
+        *   **Filtros Inteligentes:** El panel izquierdo (NAS100) limpia el ruido y muestra solo datos de EE.UU. El panel derecho (XAUUSD) muestra EE.UU. más países del G7 que impactan la liquidez global.
+        *   **Selector de Zona Horaria:** Ajusta la hora local manteniendo 🗽 NY como referencia.
+
+        ### 📊 Glosario de Proyección y Auditoría
+        Esta columna evalúa en tiempo real si el dato publicado es favorable o desfavorable para tu activo (NAS100 o XAUUSD).
+
+        **1. Direccionalidad (El impacto en el precio):**
+        *   **🟢 ALCISTA:** El dato publicado es positivo para el activo (ej. debilita al dólar, sube el Oro o el Nasdaq).
+        *   **🔴 BAJISTA:** El dato publicado genera presión de venta en el activo (fortalece al dólar).
+        *   **⚪ NEUTRAL:** El dato publicado es exactamente igual al anterior (sin impacto direccional claro).
+
+        **2. Auditoría del Pronóstico (Lo que esperaba el mercado):**
+        *   **🎯 Exacto:** El dato real fue idéntico a la predicción del mercado.
+        *   **✅ Cumplido:** El dato movió la balanza hacia donde el mercado predecía (ej. se esperaba que bajara la inflación, y bajó).
+        *   **❌ Al contrario:** Efecto sorpresa. El dato salió en la dirección opuesta a lo que esperaba el mercado (suele generar alta volatilidad en contra).
+        *   **(Vs. Anterior):** No había pronóstico previo, por lo que el sistema comparó el dato actual directamente con el del mes/periodo anterior.
+
+        **3. Estados Previos (Antes de la noticia):**
+        *   **⏳ Pendiente (Se espera...):** Faltan horas o minutos para el dato. El sistema te adelanta si el pronóstico institucional proyecta un movimiento Alcista o Bajista.
+        *   **⏳ Pendiente (Sin pronóstico):** Faltan horas o minutos, pero no hay un consenso numérico en el mercado.
+
+        **4. Discursos de Banqueros Centrales (Fed, BCE, BoJ):**
+        *   **🎙️ Pendiente (Alta volatilidad en vivo):** Un presidente o miembro del Banco Central va a hablar. Al no haber cifras, el algoritmo no puede predecir la dirección; prepárate para movimientos erráticos.
+        *   **🎙️ Discurso realizado:** La hora del discurso ya pasó. Ahora depende de ti interpretar si su discurso tuvo un tono *Hawkish* (restrictivo/malo para los mercados) o *Dovish* (suave/bueno para los mercados).
         """)
         
     st.markdown(
