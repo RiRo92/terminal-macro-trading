@@ -155,7 +155,6 @@ def obtener_discursos_ff():
         if res.status_code == 200:
             datos = res.json()
             mapa_imp_ff = {"High": 1, "Medium": 0, "Low": -1, "Holiday": -1}
-            # Monedas seleccionadas: USD, CAD, CNY, EUR, JPY + GBP
             mapa_pais_ff = {"USD": "US", "CAD": "CA", "CNY": "CN", "EUR": "EU", "JPY": "JP", "GBP": "GB"}
             
             for ev in datos:
@@ -209,7 +208,7 @@ def obtener_datos_mes_rapido(anio, mes, bloque_tiempo):
     params = {
         "from": inicio_utc,
         "to": fin_utc,
-        "countries": "US,CA,CN,EU,JP,GB" # Incluye Canadá (CA) junto con US, CN, EU, JP, GB
+        "countries": "US,CA,CN,EU,JP,GB"
     }
     headers = {
         "Origin": "https://www.tradingview.com",
@@ -291,7 +290,6 @@ def obtener_breaking_news(api_key):
 
 # 4. Filtros por Activo
 def es_relevante_nas100(fila, filtro_estricto=False):
-    # NAS100 solo reacciona directamente a Estados Unidos (USD)
     if fila.get('country') != 'US':
         return False
     if not filtro_estricto:
@@ -311,11 +309,9 @@ def es_relevante_xauusd(fila, filtro_estricto=False):
     imp = fila.get('importance', -1)
     titulo = str(fila.get('title', '')).lower()
     
-    # Para Canadá (CA), China (CN), Eurozona (EU), Japón (JP) y Reino Unido (GB): dejar Alto Impacto (1)
     if pais in ['CA', 'CN', 'EU', 'JP', 'GB']:
         return imp == 1
         
-    # Para Estados Unidos (US): mostrar todo por defecto
     if pais == 'US':
         if not filtro_estricto:
             return True
@@ -448,6 +444,8 @@ def calcular_intervalo_refresco(df_hoy, ahora):
 @st.fragment(run_every=10)
 def renderizar_terminal():
     ahora = datetime.now(tz_bolivia)
+    tz_ny = pytz.timezone('America/New_York')
+    ahora_ny = ahora.astimezone(tz_ny)
     
     divisor_cache = 10 if st.session_state.modo_francotirador else 180
     bloque_tiempo = int(ahora.timestamp() // divisor_cache)
@@ -622,9 +620,9 @@ def renderizar_terminal():
     f_sel = st.session_state.fecha_seleccionada
     estado_radar = "⚡ EN VIVO (10s)" if st.session_state.modo_francotirador else "🟢 Normal (3m)"
     
-    c_tit_dia, c_check_ruido, c_filtro_imp = st.columns([4.8, 2.3, 2.4])
+    c_tit_dia, c_check_ruido, c_filtro_imp = st.columns([5.2, 2.0, 2.4])
     with c_tit_dia:
-        st.subheader(f"📋 {f_sel.strftime('%d/%m/%Y')} | `{ahora.strftime('%H:%M:%S')}` • {estado_radar}")
+        st.subheader(f"📋 {f_sel.strftime('%d/%m/%Y')} | 🗽 NY {ahora_ny.strftime('%H:%M')} • 🇧🇴 BO {ahora_bol.strftime('%H:%M')} | {estado_radar}")
     with c_check_ruido:
         filtro_estricto = st.checkbox("🛡️ Ocultar subastas 3M/6M y agrícolas", value=False)
     with c_filtro_imp:
