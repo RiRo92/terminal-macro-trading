@@ -1,0 +1,28 @@
+name: Bot Francotirador de Noticias
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  vigilar-mercado:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Descargar código del repositorio
+        uses: actions/checkout@v3
+
+      - name: Configurar entorno de Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Instalar librerías necesarias
+        run: pip install requests pandas pytz
+
+      - name: Ejecutar Radar de 5 minutos
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python bot_alertas.py
