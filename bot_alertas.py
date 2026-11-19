@@ -1,4 +1,5 @@
 import os
+import time
 import json
 import calendar
 import requests
@@ -32,11 +33,14 @@ def enviar_telegram(mensaje):
         print("ERROR: Faltan TELEGRAM_TOKEN o TELEGRAM_CHAT_ID en GitHub Secrets.")
         return
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    datos = {"chat_id": CHAT_ID, "text": mensaje, "parse_mode": "Markdown"}
     try:
-        r = requests.post(url, data=datos, timeout=10)
+        r = requests.post(url, data={"chat_id": CHAT_ID, "text": mensaje, "parse_mode": "Markdown"}, timeout=10)
         if r.status_code != 200:
-            print(f"Error Telegram ({r.status_code}): {r.text}")
+            print(f"Aviso Markdown ({r.status_code}): {r.text} -> Reintentando sin formato...")
+            texto_limpio = mensaje.replace("*", "").replace("`", "")
+            r2 = requests.post(url, data={"chat_id": CHAT_ID, "text": texto_limpio}, timeout=10)
+            if r2.status_code != 200:
+                print(f"Error Telegram definitivo ({r2.status_code}): {r2.text}")
     except Exception as e:
         print(f"Excepción enviando Telegram: {e}")
 
@@ -64,22 +68,22 @@ def es_relevante(fila):
     imp = fila.get("importance", -1)
     titulo = str(fila.get("title", "")).lower()
 
-    if imp not in [1, 0]:  # Solo Alto (1) y Medio (0)
+    if imp not in [1, 0]:
         return False
     if any(p in titulo for p in RUIDO):
         return False
     if pais == "US":
         return True
     if pais in ["CA", "CN", "EU", "JP", "GB"]:
-        return imp == 1  # Extranjeras solo Alto impacto
+        return imp == 1
     return False
 
 
 def obtener_activos(fila):
     pais = fila.get("country", "")
     if pais == "US":
-        return True, True, "🇺🇸 NAS100 | 🪙 XAUUSD"
-    return False, True, "🪙 XAUUSD"
+        return True, True, "🇺🇸 NAS100 | 🥇 XAUUSD"
+    return False, True, "🥇 XAUUSD"
 
 
 def obtener_datos():
@@ -95,7 +99,6 @@ def obtener_datos():
     }
     eventos = []
 
-    # 1. TradingView
     try:
         res = requests.get(
             "https://economic-calendar.tradingview.com/events",
@@ -123,7 +126,6 @@ def obtener_datos():
     except Exception as e:
         print(f"Error TradingView: {e}")
 
-    # 2. Forex Factory (Discursos)
     try:
         res_ff = requests.get(
             "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
@@ -166,8 +168,9 @@ def obtener_datos():
     return df
 
 
-def calcular_sesgo(fila):
-    actual, pron, ant = fila.get("actual"), fila.get("forecast"), fila.get("previous")
+def calcular_sesgo(fila, ignorar_actual=False):
+    actual = None if ignorar_actual else fila.get("actual")
+    pron, ant = fila.get("forecast"), fila.get("previous")
     es_ext = fila.get("country", "US") in ["CA", "CN", "EU", "JP", "GB"]
 
     if fila.get("es_discurso") and pd.isna(actual):
@@ -220,29 +223,130 @@ def calcular_sesgo(fila):
         return "ℹ️ Publicado"
 
 
-def leer_vela_m5(simbolo, nombre):
+def formatear_analisis_vela(nombre, o, h, l, c, es_oro=False):
+    puntos = c - o
+    rango_total = h - l
+    pct = (puntos / o) * 100 if o else 0
+    mecha_sup = h - max(o, c)
+    mecha_inf = min(o, c) - l
+
+    if puntos > 0:
+        direccion = f"🟢 *SUBIÓ +{puntos:.2f} pts*"
+    elif puntos < 0:
+        direccion = f"🔴 *BAJÓ {puntos:.2f} pts*"
+    else:
+        direccion = "⚪ *CERRÓ PLANA (0.00 pts)*"
+
+    extra_pips = f" ({puntos * 10:+.0f} pips)" if es_oro else ""
+
+    cuerpo = abs(puntos)
+    nota_mecha = ""
+    if mecha_sup > cuerpo * 1.8 and mecha_sup > mecha_inf:
+        nota_mecha = " | ⚠️ Rechazo arriba (mecha sup.)"
+    elif mecha_inf > cuerpo * 1.8 and mecha_inf > mecha_sup:
+        nota_mecha = " | ⚠️ Rechazo abajo (mecha inf.)"
+
+    return (
+        f"• *{nombre}:* {direccion}{extra_pips} (`{pct:+.2f}%`)\n"
+        f"  📏 Rango M5: `{rango_total:.2f} pts`{nota_mecha}\n"
+        f"  `O:{o:.2f} | H:{h:.2f} | L:{l:.2f} | C:{c:.2f}`"
+    )
+
+
+def leer_vela_exacta_m5(fecha_ev, es_oro=True, permitir_ultima_si_futura=False):
+    vela_inicio_utc = fecha_ev.floor("5min")
+    hora_vela_bo = vela_inicio_utc.astimezone(TZ_BO).strftime("%H:%M")
+
+    simbolo = "GC=F" if es_oro else "NQ=F"
+    nombre = f"XAUUSD Futuro (Vela {hora_vela_bo} BO)" if es_oro else f"NAS100 Futuro (Vela {hora_vela_bo} BO)"
     try:
         df = yf.download(simbolo, period="1d", interval="5m", progress=False)
-        if df.empty or len(df) < 1:
+        if df.empty:
             return f"• *{nombre}:* Sin datos M5 disponibles"
-        vela = df.iloc[-1]
-        o = float(vela["Open"].iloc[0]) if hasattr(vela["Open"], "iloc") else float(vela["Open"])
-        h = float(vela["High"].iloc[0]) if hasattr(vela["High"], "iloc") else float(vela["High"])
-        l = float(vela["Low"].iloc[0]) if hasattr(vela["Low"], "iloc") else float(vela["Low"])
-        c = float(vela["Close"].iloc[0]) if hasattr(vela["Close"], "iloc") else float(vela["Close"])
-        diff = c - o
-        pct = (diff / o) * 100 if o else 0
-        icono = "🟢" if diff > 0 else ("🔴" if diff < 0 else "⚪")
-        return f"• *{nombre}:* {icono} {diff:+.2f} ({pct:+.2f}%)\n  `O:{o:.2f} | H:{h:.2f} | L:{l:.2f} | C:{c:.2f}`"
-    except Exception:
-        return f"• *{nombre}:* Error leyendo vela M5"
+
+        if df.index.tz is None:
+            df.index = df.index.tz_localize("UTC")
+        else:
+            df.index = df.index.tz_convert("UTC")
+
+        vela = None
+        if vela_inicio_utc in df.index:
+            vela = df.loc[vela_inicio_utc]
+        elif permitir_ultima_si_futura:
+            vela = df.iloc[-1]
+            hora_ult_bo = df.index[-1].astimezone(TZ_BO).strftime("%H:%M")
+            nombre = f"XAUUSD Futuro (Última vela {hora_ult_bo} BO)" if es_oro else f"NAS100 Futuro (Última vela {hora_ult_bo} BO)"
+
+        if vela is not None:
+            if isinstance(vela, pd.DataFrame):
+                vela = vela.iloc[0]
+            o = float(vela["Open"].iloc[0]) if hasattr(vela["Open"], "iloc") else float(vela["Open"])
+            h = float(vela["High"].iloc[0]) if hasattr(vela["High"], "iloc") else float(vela["High"])
+            l = float(vela["Low"].iloc[0]) if hasattr(vela["Low"], "iloc") else float(vela["Low"])
+            c = float(vela["Close"].iloc[0]) if hasattr(vela["Close"], "iloc") else float(vela["Close"])
+            return formatear_analisis_vela(nombre, o, h, l, c, es_oro=es_oro)
+
+        return f"• *{nombre}:* ⏳ Vela aún pendiente por retraso de Yahoo Finance"
+    except Exception as e:
+        return f"• *{nombre}:* Error leyendo vela M5 ({e})"
 
 
 def fmt(v):
     return str(v) if pd.notna(v) and str(v).strip() != "" else "-"
 
 
-def enviar_resumen_hoy(df):
+def construir_alerta_1(r):
+    imp_txt = "🔴 ALTO IMPACTO" if r["importance"] == 1 else "🟠 MEDIO IMPACTO"
+    band = BANDERAS.get(r["country"], "🌐")
+    _, _, activos_txt = obtener_activos(r)
+    h_ny = r["date"].astimezone(TZ_NY).strftime("%H:%M")
+    h_bo = r["date"].astimezone(TZ_BO).strftime("%H:%M")
+    sesgo_previo = calcular_sesgo(r, ignorar_actual=True)
+    return (
+        f"🚨 *ALERTA 1/3 — NOTICIA PRÓXIMA* 🚨\n\n"
+        f"*{imp_txt}*\n"
+        f"🎯 *Activos:* {activos_txt}\n"
+        f"📌 {band} {r['title']}\n"
+        f"🕒 *NY:* {h_ny} | *BO:* {h_bo}\n"
+        f"📊 Ant: `{fmt(r['previous'])}` | Pron: `{fmt(r['forecast'])}` | Real: `-`\n"
+        f"🧭 *Proyección:* {sesgo_previo}"
+    )
+
+
+def construir_alerta_2(r):
+    band = BANDERAS.get(r["country"], "🌐")
+    _, _, activos_txt = obtener_activos(r)
+    sesgo_real = calcular_sesgo(r, ignorar_actual=False)
+    return (
+        f"⚡ *ALERTA 2/3 — DATO CONFIRMADO* ⚡\n\n"
+        f"🎯 *Activos:* {activos_txt}\n"
+        f"📌 {band} {r['title']}\n"
+        f"📊 Ant: `{fmt(r['previous'])}` | Pron: `{fmt(r['forecast'])}` | *Real:* `{fmt(r['actual'])}`\n"
+        f"🧭 *Resultado:* {sesgo_real}"
+    )
+
+
+def construir_alerta_3(r, permitir_ultima_si_futura=False):
+    band = BANDERAS.get(r["country"], "🌐")
+    es_nas, es_xau, activos_txt = obtener_activos(r)
+    sesgo_real = calcular_sesgo(r, ignorar_actual=False)
+    velas = []
+    if es_xau:
+        velas.append(leer_vela_exacta_m5(r["date"], es_oro=True, permitir_ultima_si_futura=permitir_ultima_si_futura))
+    if es_nas:
+        velas.append(leer_vela_exacta_m5(r["date"], es_oro=False, permitir_ultima_si_futura=permitir_ultima_si_futura))
+    return (
+        f"🕯️ *ALERTA 3/3 — CIERRE VELA M5 (+5 MIN)* 🕯️\n\n"
+        f"🎯 *Activos:* {activos_txt}\n"
+        f"📌 {band} {r['title']}\n"
+        f"📊 Ant: `{fmt(r['previous'])}` | Pron: `{fmt(r['forecast'])}` | *Real:* `{fmt(r['actual'])}`\n"
+        f"🧭 *Dato:* {sesgo_real}\n\n"
+        f"📉 *Movimiento de la Vela M5:*\n"
+        + "\n".join(velas)
+    )
+
+
+def ejecutar_prueba_manual(df):
     hoy_bo = datetime.now(TZ_BO).date()
     df_hoy = df[df["date"].dt.tz_convert(TZ_BO).dt.date == hoy_bo].sort_values(by="date")
     df_hoy = df_hoy[df_hoy.apply(es_relevante, axis=1)]
@@ -259,14 +363,23 @@ def enviar_resumen_hoy(df):
         h_ny = r["date"].astimezone(TZ_NY).strftime("%H:%M")
         h_bo = r["date"].astimezone(TZ_BO).strftime("%H:%M")
         sesgo = calcular_sesgo(r)
-        bloque = (
+        lineas.append(
             f"{ico} `{h_ny} NY | {h_bo} BO` — {band} *{r['title']}*\n"
             f"   🎯 *Activos:* {activos_txt}\n"
             f"   📊 Ant: `{fmt(r['previous'])}` | Pron: `{fmt(r['forecast'])}` | Real: `{fmt(r['actual'])}`\n"
             f"   🧭 {sesgo}\n"
         )
-        lineas.append(bloque)
     enviar_telegram("\n".join(lineas))
+    time.sleep(1)
+
+    con_real = df_hoy[df_hoy["actual"].notna() & (df_hoy["actual"].astype(str).str.strip() != "")]
+    ejemplo = con_real.iloc[-1] if not con_real.empty else df_hoy.iloc[0]
+
+    enviar_telegram(construir_alerta_1(ejemplo))
+    time.sleep(1)
+    enviar_telegram(construir_alerta_2(ejemplo))
+    time.sleep(1)
+    enviar_telegram(construir_alerta_3(ejemplo, permitir_ultima_si_futura=True))
 
 
 def ejecutar():
@@ -276,7 +389,7 @@ def ejecutar():
         return
 
     if EVENTO_GITHUB == "workflow_dispatch":
-        enviar_resumen_hoy(df)
+        ejecutar_prueba_manual(df)
 
     estado = cargar_estado()
     ahora_utc = datetime.now(pytz.utc)
@@ -290,57 +403,17 @@ def ejecutar():
         ev_id = f"{fecha_ev.strftime('%Y-%m-%d_%H:%M')}_{r['title_key']}"
         fases = estado.get(ev_id, [])
 
-        imp_txt = "🔴 ALTO IMPACTO" if r["importance"] == 1 else "🟠 MEDIO IMPACTO"
-        band = BANDERAS.get(r["country"], "🌐")
-        es_nas, es_xau, activos_txt = obtener_activos(r)
-        h_ny = fecha_ev.astimezone(TZ_NY).strftime("%H:%M")
-        h_bo = fecha_ev.astimezone(TZ_BO).strftime("%H:%M")
-        sesgo = calcular_sesgo(r)
-
-        # ALERTA 1: Entre 1 y 12 min antes (ventana amplia por retraso de GitHub cron)
         if "1" not in fases and (0.5 <= diff_min <= 12):
-            msg = (
-                f"🚨 *ALERTA 1/3 — NOTICIA PRÓXIMA* 🚨\n\n"
-                f"*{imp_txt}*\n"
-                f"🎯 *Activos:* {activos_txt}\n"
-                f"📌 {band} {r['title']}\n"
-                f"🕒 *NY:* {h_ny} | *BO:* {h_bo}\n"
-                f"📊 Ant: `{fmt(r['previous'])}` | Pron: `{fmt(r['forecast'])}` | Real: `{fmt(r['actual'])}`\n"
-                f"🧭 *Proyección:* {sesgo}"
-            )
-            enviar_telegram(msg)
+            enviar_telegram(construir_alerta_1(r))
             fases.append("1")
 
-        # ALERTA 2: Confirmación cuando ya salió el dato Real
         tiene_real = pd.notna(r["actual"]) and str(r["actual"]).strip() != ""
         if "2" not in fases and (-15 <= diff_min <= 0) and (tiene_real or r["es_discurso"]):
-            msg = (
-                f"⚡ *ALERTA 2/3 — DATO CONFIRMADO* ⚡\n\n"
-                f"🎯 *Activos:* {activos_txt}\n"
-                f"📌 {band} {r['title']}\n"
-                f"📊 Ant: `{fmt(r['previous'])}` | Pron: `{fmt(r['forecast'])}` | *Real:* `{fmt(r['actual'])}`\n"
-                f"🧭 *Resultado:* {sesgo}"
-            )
-            enviar_telegram(msg)
+            enviar_telegram(construir_alerta_2(r))
             fases.append("2")
 
-        # ALERTA 3: 5 min después (cierre de vela M5 y reacción del precio)
-        if "3" not in fases and (-20 <= diff_min <= -5):
-            velas = []
-            if es_xau:
-                velas.append(leer_vela_m5("GC=F", "XAUUSD (Futuro Oro)"))
-            if es_nas:
-                velas.append(leer_vela_m5("NQ=F", "NAS100 (Futuro Nasdaq)"))
-            msg = (
-                f"🕯️ *ALERTA 3/3 — CIERRE VELA M5 (+5 MIN)* 🕯️\n\n"
-                f"🎯 *Activos:* {activos_txt}\n"
-                f"📌 {band} {r['title']}\n"
-                f"📊 Ant: `{fmt(r['previous'])}` | Pron: `{fmt(r['forecast'])}` | *Real:* `{fmt(r['actual'])}`\n"
-                f"🧭 *Dato:* {sesgo}\n\n"
-                f"📉 *Reacción del precio (Vela M5):*\n"
-                + "\n".join(velas)
-            )
-            enviar_telegram(msg)
+        if "3" not in fases and (-25 <= diff_min <= -5.5):
+            enviar_telegram(construir_alerta_3(r, permitir_ultima_si_futura=False))
             fases.append("3")
 
         if fases:
