@@ -7,7 +7,7 @@ import pytz
 import html
 
 # --- 1. CONFIGURACIÓN Y METADATOS ---
-VERSION_APP = "1.6.1"
+VERSION_APP = "1.7.0"
 AUTOR = "Richard Rocha"
 TELEGRAM_URL = "https://t.me/AlertasOroNasdaq"
 
@@ -19,22 +19,26 @@ st.set_page_config(
 
 FINNHUB_API_KEY = "dbtk2ehr01qtr41fbk30dbtk2ehr01qtr41fbk3g"
 
-# --- ESTILOS CSS ---
+# --- ESTILOS CSS (ALTO CONTRASTE EN MODO CLARO Y OSCURO) ---
 st.markdown("""
     <style>
-        .block-container { padding-top: 3.3rem !important; padding-bottom: 1rem; }
+        .block-container { padding-top: 3.1rem !important; padding-bottom: 1rem; }
         h1 { font-size: 1.6rem !important; margin-bottom: 0rem !important; }
 
         /* Cinta horizontal */
         .ticker-wrap {
             width: 100%; overflow: hidden; background-color: #0F172A;
             border: 2px solid #3B82F6; border-radius: 8px; padding: 10px 0;
-            margin-bottom: 12px; white-space: nowrap; box-sizing: border-box; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.4);
+            margin-bottom: 12px; white-space: nowrap; box-sizing: border-box; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.35);
         }
         .ticker-move { display: inline-block; padding-left: 10%; animation: ticker-scroll 130s linear infinite; }
         .ticker-wrap:hover .ticker-move { animation-play-state: paused; }
         @keyframes ticker-scroll { 0% { transform: translate3d(0, 0, 0); } 100% { transform: translate3d(-100%, 0, 0); } }
-        .ticker-item { display: inline-block; padding: 0 30px; font-size: 0.95rem; color: #F8FAFC; border-right: 1px solid #475569; }
+        .ticker-item { display: inline-block; padding: 0 28px; font-size: 0.94rem; color: #F8FAFC !important; border-right: 1px solid #475569; }
+        .ticker-item code {
+            background-color: #1E293B !important; color: #38BDF8 !important;
+            border: 1px solid #334155; padding: 1px 6px; border-radius: 4px; font-weight: bold;
+        }
 
         /* Banner Telegram */
         .tg-banner {
@@ -42,7 +46,7 @@ st.markdown("""
             background: linear-gradient(90deg, #0F172A 0%, #1E293B 100%);
             border: 1px solid #38BDF8; border-radius: 8px; padding: 10px 16px; margin-bottom: 14px;
         }
-        .tg-text { color: #F8FAFC; font-size: 0.94rem; }
+        .tg-text { color: #F8FAFC !important; font-size: 0.94rem; }
         .tg-btn {
             background-color: #0088cc; color: #FFFFFF !important; padding: 8px 16px; border-radius: 6px;
             text-decoration: none !important; font-weight: bold; font-size: 0.9rem; white-space: nowrap;
@@ -51,13 +55,26 @@ st.markdown("""
         .tg-btn:hover { background-color: #0077b5; }
 
         /* Badges */
-        .badge-nas { background-color: #2563EB; color: white; padding: 2px 7px; border-radius: 4px; font-weight: bold; font-size: 0.78rem; }
-        .badge-xau { background-color: #D97706; color: white; padding: 2px 7px; border-radius: 4px; font-weight: bold; font-size: 0.78rem; }
-        .badge-brk { background-color: #DC2626; color: white; padding: 2px 7px; border-radius: 4px; font-weight: bold; font-size: 0.78rem; }
+        .badge-nas { background-color: #2563EB; color: #FFFFFF !important; padding: 2px 7px; border-radius: 4px; font-weight: bold; font-size: 0.78rem; }
+        .badge-xau { background-color: #D97706; color: #FFFFFF !important; padding: 2px 7px; border-radius: 4px; font-weight: bold; font-size: 0.78rem; }
+        .badge-brk { background-color: #DC2626; color: #FFFFFF !important; padding: 2px 7px; border-radius: 4px; font-weight: bold; font-size: 0.78rem; }
+
+        /* Tarjetas Breaking News (contraste garantizado) */
+        .bn-card {
+            background-color: #0F172A; border: 1px solid #334155; border-left: 4px solid #3B82F6;
+            border-radius: 8px; padding: 12px 14px; margin-bottom: 10px;
+        }
+        .bn-meta { color: #94A3B8; font-size: 0.83rem; margin-bottom: 6px; }
+        .bn-time {
+            background-color: #1E293B; color: #38BDF8; padding: 2px 6px;
+            border-radius: 4px; font-family: monospace; font-weight: bold;
+        }
+        .bn-link { color: #F8FAFC !important; font-weight: 600; font-size: 0.95rem; text-decoration: none; }
+        .bn-link:hover { color: #60A5FA !important; text-decoration: underline; }
 
         /* Calendario PC */
         .cal-header, .cal-header-wknd { text-align: center; font-weight: bold; padding: 6px; border-radius: 4px; margin-bottom: 4px; font-size: 0.85rem; }
-        .cal-header { background-color: #1F2937; color: #F9FAFB; }
+        .cal-header { background-color: #1E293B; color: #F8FAFC; }
         .cal-header-wknd { background-color: #451A1A; color: #FCA5A5; }
 
         /* Tarjetas Móviles */
@@ -67,20 +84,22 @@ st.markdown("""
         .mob-card-low  { border-left-color: #10B981; }
         .mob-top { font-size: 0.92rem; font-weight: 600; color: #F9FAFB; margin-bottom: 5px; line-height: 1.3; }
         .mob-nums { font-size: 0.80rem; color: #9CA3AF; margin-bottom: 5px; }
-        .mob-nums code { color: #E5E7EB; background-color: #1F2937; padding: 1px 5px; border-radius: 4px; }
+        .mob-nums code { color: #38BDF8; background-color: #1F2937; padding: 1px 5px; border-radius: 4px; }
         .mob-proy { font-size: 0.84rem; font-weight: bold; color: #E5E7EB; }
 
         /* Pie de página */
         .footer-info { text-align: center; color: #6B7280; font-size: 0.85rem; margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #374151; }
 
         /* Alinear Botón Actualizar PC */
-        div[data-testid="column"]:last-child div.stButton { margin-top: 28px; }
+        div[data-testid="column"]:last-child div.stButton { margin-top: 26px; }
 
         /* RESPONSIVIDAD */
         @media (min-width: 769px) {
             div[data-testid="stVerticalBlock"]:has(> div.element-container .marker-movil) { display: none !important; }
-            div[data-testid="stVerticalBlock"]:has(> div.element-container .marker-pc) div[data-testid="column"] button { height: 68px !important; padding: 4px !important; line-height: 1.25 !important; font-size: 0.82rem !important; }
-            div.flotante-btn { display: none !important; }
+            div[data-testid="stVerticalBlock"]:has(> div.element-container .marker-flotante) { display: none !important; }
+            div[data-testid="stVerticalBlock"]:has(> div.element-container .marker-pc) div[data-testid="column"] button {
+                height: 68px !important; padding: 4px !important; line-height: 1.25 !important; font-size: 0.82rem !important;
+            }
         }
         @media (max-width: 768px) {
             .block-container { padding-top: 2.8rem !important; padding-left: 0.6rem !important; padding-right: 0.6rem !important; }
@@ -92,55 +111,115 @@ st.markdown("""
             .tg-btn { width: 100%; text-align: center; }
             div[data-testid="column"]:last-child div.stButton { margin-top: 0px; }
 
-            div.flotante-btn {
-                position: fixed; bottom: 80px; right: 20px; z-index: 99999;
+            div[data-testid="stVerticalBlock"]:has(> div.element-container .marker-flotante) {
+                position: fixed; bottom: 80px; right: 20px; z-index: 99999; width: auto !important;
             }
-            div.flotante-btn button {
+            div[data-testid="stVerticalBlock"]:has(> div.element-container .marker-flotante) button {
                 width: 55px !important; height: 55px !important; border-radius: 50% !important;
                 background-color: #3B82F6 !important; color: white !important;
                 border: 2px solid #60A5FA !important; box-shadow: 0 4px 12px rgba(0,0,0,0.5) !important;
                 font-size: 24px !important; display: flex !important; align-items: center !important; justify-content: center !important; padding: 0 !important;
             }
-            div.flotante-btn button p { display: none !important; }
-            div.flotante-btn button::after { content: "🔄"; }
+            div[data-testid="stVerticalBlock"]:has(> div.element-container .marker-flotante) button p { display: none !important; }
+            div[data-testid="stVerticalBlock"]:has(> div.element-container .marker-flotante) button::after { content: "🔄"; }
         }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. DICCIONARIO DE TRADUCCIÓN ---
+# --- 2. DICCIONARIO DE TRADUCCIÓN COMPLETO ---
 DICCIONARIO_TRADUCCION = {
-    "Speaks": "Habla", "Member": "Miembro", "Balance of Trade": "Balanza Comercial",
-    "Crude Oil Stock Change": "Cambio Inv. Crudo", "Unemployment Rate": "Tasa de Desempleo",
-    "Initial Jobless Claims": "Peticiones de Desempleo", "Core CPI": "IPC Subyacente",
-    " CPI": " IPC", "Retail Sales": "Ventas Minoristas", "Non Farm Payrolls": "Nóminas No Agrícolas",
-    "Gross Domestic Product": "PIB", " GDP": " PIB", "Interest Rate Decision": "Decisión de Tasas",
-    "Building Permits": "Permisos de Construcción", "Existing Home Sales": "Ventas Viviendas Usadas",
-    "New Home Sales": "Ventas Viviendas Nuevas", "Services PMI": "PMI Servicios",
-    "Manufacturing PMI": "PMI Manufacturero", "Fed Chair": "Pdte. Fed", "Testifies": "Testifica",
-    "Statement": "Declaración", "Minutes": "Actas FOMC", "Press Conference": "Rueda de Prensa",
-    "Product Imports": "Imp. Productos", "Gasoline Stocks": "Inv. Gasolina",
-    "Distillate Stocks": "Inv. Destilados", "Heating Oil": "Aceite Calefacción",
-    "Crude Imports": "Imp. Crudo", "Crude Runs": "Refinación Crudo",
-    "Cushing Number": "Inv. Cushing", "Weekly Statistical Bulletin": "Boletín Semanal",
-    "Consumer Confidence": "Confianza Consumidor", "Industrial Production": "Producción Industrial",
-    "Durable Goods Orders": "Pedidos Bienes Duraderos", "Trade Balance": "Balanza Comercial",
-    "Jobless Claims": "Subsidios Desempleo", "Wage Growth": "Crecimiento Salarial",
-    "Inflation Rate": "Tasa Inflación", "Producer Price Index": "IPP",
-    " PPI": " IPP", "Wholesale Inventories": "Inventarios Mayoristas",
-    " Fed": " Reserva Federal", " ECB": " BCE", " BoE": " BdI", " BoJ": " BdJ",
-    "YoY": "Interanual", "MoM": "Mensual", "QoQ": "Trimestral",
-    "Core PCE Price Index": "PCE Subyacente", "PCE Price Index": "Índice PCE",
-    "Export Prices": "Precios de Exportación", "Import Prices": "Precios de Importación",
-    "Capacity Utilization": "Utilización de Capacidad", "Control Group": "Grupo de Control",
-    "Ex Autos": "Excl. Autos", "Ex Gas/Autos": "Excl. Gas/Autos",
-    "Employment Change": "Cambio de Empleo", "Manufacturing Production": "Prod. Manufacturera"
+    "Continuing Jobless Claims": "Subsidios Desempleo Continuos",
+    "Initial Jobless Claims": "Peticiones Iniciales de Desempleo",
+    "Jobless Claims 4-week Average": "Promedio 4 Semanas Subsidios Desempleo",
+    "Jobless Claims": "Subsidios de Desempleo",
+    "Non Farm Payrolls": "Nóminas No Agrícolas (NFP)",
+    "ADP Employment Change Weekly": "Cambio de Empleo ADP Semanal",
+    "ADP Employment Change": "Cambio de Empleo ADP",
+    "Employment Change": "Cambio de Empleo",
+    "Unemployment Rate": "Tasa de Desempleo",
+    "Core PCE Price Index": "Índice PCE Subyacente",
+    "PCE Price Index": "Índice de Precios PCE",
+    "Core CPI": "IPC Subyacente",
+    "CPI": "IPC",
+    "Producer Price Index": "Índice de Precios al Productor (IPP)",
+    "PPI": "IPP",
+    "Inflation Rate": "Tasa de Inflación",
+    "Interest Rate Decision": "Decisión de Tasas de Interés",
+    "Fed Balance Sheet": "Balance de la Reserva Federal",
+    "Philadelphia Fed Manufacturing Index": "Índice Manufacturero Fed Filadelfia",
+    "Philly Fed Business Conditions": "Condiciones de Negocio Fed Filadelfia",
+    "Philly Fed CAPEX Index": "Índice CAPEX Fed Filadelfia",
+    "Philly Fed Employment": "Empleo Fed Filadelfia",
+    "Philly Fed New Orders": "Nuevos Pedidos Fed Filadelfia",
+    "Philly Fed Prices Paid": "Precios Pagados Fed Filadelfia",
+    "Kansas Fed Manufacturing Index": "Índice Manufacturero Fed Kansas",
+    "Kansas Fed Composite Index": "Índice Compuesto Fed Kansas",
+    "NY Empire State Manufacturing Index": "Índice Manufacturero Empire State",
+    "CB Leading Index": "Índice Líder CB",
+    "Consumer Confidence": "Confianza del Consumidor",
+    "Retail Sales": "Ventas Minoristas",
+    "Gross Domestic Product": "Producto Interno Bruto (PIB)",
+    "GDP": "PIB",
+    "Building Permits": "Permisos de Construcción",
+    "Existing Home Sales": "Ventas de Viviendas Usadas",
+    "New Home Sales": "Ventas de Viviendas Nuevas",
+    "30-Year Mortgage Rate": "Tasa Hipotecaria a 30 Años",
+    "Services PMI": "PMI de Servicios",
+    "Manufacturing PMI": "PMI Manufacturero",
+    "Composite PMI": "PMI Compuesto",
+    "Industrial Production": "Producción Industrial",
+    "Manufacturing Production": "Producción Manufacturera",
+    "Durable Goods Orders": "Pedidos de Bienes Duraderos",
+    "Wholesale Inventories": "Inventarios Mayoristas",
+    "Balance of Trade": "Balanza Comercial",
+    "Trade Balance": "Balanza Comercial",
+    "Wage Growth": "Crecimiento Salarial",
+    "Export Prices": "Precios de Exportación",
+    "Import Prices": "Precios de Importación",
+    "Capacity Utilization": "Utilización de Capacidad",
+    "Control Group": "Grupo de Control",
+    "Ex Autos": "Excl. Autos",
+    "Ex Gas/Autos": "Excl. Gas/Autos",
+    "Crude Oil Stock Change": "Cambio Inventarios de Crudo",
+    "EIA Natural Gas Stocks Change": "Cambio Inventarios Gas Natural EIA",
+    "Gasoline Stocks": "Inventarios de Gasolina",
+    "Distillate Stocks": "Inventarios de Destilados",
+    "10-Year TIPS Auction Bid-to-Cover": "Subasta TIPS 10 Años (Demanda)",
+    "10-Year TIPS Auction Total Accepted": "Subasta TIPS 10 Años (Total Aceptado)",
+    "10-Year TIPS Auction Allotted at High": "Subasta TIPS 10 Años (Tasa Máxima)",
+    "10-Year TIPS Auction": "Subasta TIPS a 10 Años",
+    "4-Week Bill Auction Bid-to-Cover": "Subasta Letras 4 Semanas (Demanda)",
+    "4-Week Bill Auction Total Accepted": "Subasta Letras 4 Semanas (Total Aceptado)",
+    "4-Week Bill Auction Allotted at High": "Subasta Letras 4 Semanas (Tasa Máxima)",
+    "4-Week Bill Auction": "Subasta Letras a 4 Semanas",
+    "Bill Auction": "Subasta de Letras",
+    "Bond Auction": "Subasta de Bonos",
+    "Note Auction": "Subasta de Notas",
+    "Press Conference": "Rueda de Prensa",
+    "Fed Chair": "Pdte. Fed",
+    "Testifies": "Testifica",
+    "Statement": "Declaración",
+    "Minutes": "Actas FOMC",
+    "Member": "Miembro",
+    "Speaks": "Habla",
+    "Fed": "Reserva Federal",
+    "ECB": "BCE",
+    "BoE": "Banco de Inglaterra",
+    "BoJ": "Banco de Japón",
+    "YoY": "Interanual",
+    "MoM": "Mensual",
+    "QoQ": "Trimestral",
+    "Weekly": "Semanal"
 }
+
+CLAVES_TRADUCCION_ORDENADAS = sorted(DICCIONARIO_TRADUCCION.keys(), key=len, reverse=True)
 
 def traducir_texto(texto, activo=True):
     if not activo or not texto:
         return texto
-    for ing, esp in DICCIONARIO_TRADUCCION.items():
-        texto = texto.replace(ing, esp).replace(ing.upper(), esp.upper())
+    for ing in CLAVES_TRADUCCION_ORDENADAS:
+        esp = DICCIONARIO_TRADUCCION[ing]
+        texto = texto.replace(ing, esp)
     return texto
 
 # --- 3. DESCARGA DE DATOS ---
@@ -260,7 +339,7 @@ def es_relevante_nas100(fila, filtro_estricto=False):
         return False
     if not filtro_estricto:
         return True
-    ruido_nas = ['3-month', '6-month', '4-week', '8-week', '52-week', 'bill auction', 'bond auction', 'tips auction', 'usda', 'pork', 'nopa', 'soybean', 'soja', 'wheat', 'trigo', 'corn', 'maíz', 'cattle', 'ganado', 'crude', 'petróleo', 'oil', 'gasoline', 'gasolina', 'natural gas', 'gas natural', 'baker hughes', 'rig count', 'distillate', 'cushing', 'eia', 'api weekly']
+    ruido_nas = ['3-month', '6-month', '4-week', '8-week', '52-week', 'bill auction', 'bond auction', 'tips auction', 'note auction', 'usda', 'pork', 'nopa', 'soybean', 'soja', 'wheat', 'trigo', 'corn', 'maíz', 'cattle', 'ganado', 'crude', 'petróleo', 'oil', 'gasoline', 'gasolina', 'natural gas', 'gas natural', 'baker hughes', 'rig count', 'distillate', 'cushing', 'eia', 'api weekly']
     return not any(palabra in str(fila.get('title', '')).lower() for palabra in ruido_nas)
 
 def es_relevante_xauusd(fila, filtro_estricto=False):
@@ -270,7 +349,7 @@ def es_relevante_xauusd(fila, filtro_estricto=False):
     if pais == 'US':
         if not filtro_estricto:
             return True
-        ruido_xau = ['3-month', '6-month', '4-week', '8-week', '52-week', 'bill auction', 'bond auction', 'tips auction', 'usda', 'pork', 'nopa', 'soybean', 'soja', 'wheat', 'trigo', 'corn', 'maíz', 'cattle', 'ganado', 'cotton', 'algodón']
+        ruido_xau = ['3-month', '6-month', '4-week', '8-week', '52-week', 'bill auction', 'bond auction', 'tips auction', 'note auction', 'usda', 'pork', 'nopa', 'soybean', 'soja', 'wheat', 'trigo', 'corn', 'maíz', 'cattle', 'ganado', 'cotton', 'algodón']
         return not any(palabra in str(fila.get('title', '')).lower() for palabra in ruido_xau)
     return False
 
@@ -374,6 +453,12 @@ if 'modo_francotirador' not in st.session_state:
 if 'activar_traductor' not in st.session_state:
     st.session_state.activar_traductor = True
 
+def al_cambiar_fecha_movil():
+    nueva_f = st.session_state.mob_date
+    st.session_state.fecha_seleccionada = nueva_f
+    st.session_state.mes_vista = nueva_f.month
+    st.session_state.anio_vista = nueva_f.year
+
 def calcular_intervalo_refresco(df_hoy, ahora_utc):
     if df_hoy.empty:
         return 180, False
@@ -426,7 +511,7 @@ def renderizar_terminal():
 
     if not df_actual.empty:
         for _, r in df_actual[(df_actual['date'] >= ahora_utc - timedelta(minutes=30))].sort_values(by='date').head(10).iterrows():
-            es_nas, es_xau = es_relevante_nas100(r, False), es_relevante_xauusd(r, False)
+            es_nas, es_xau = es_relevante_nas100(r, True), es_relevante_xauusd(r, True)
             if not (es_nas or es_xau):
                 continue
             imp_ico = "🔴" if r.get('importance') == 1 else "🟠" if r.get('importance') == 0 else "🟡"
@@ -457,14 +542,19 @@ def renderizar_terminal():
     f_sel = st.session_state.fecha_seleccionada
     estado_radar = "⚡ EN VIVO (10s)" if st.session_state.modo_francotirador else "🟢 Normal (3m)"
 
-    c_tit_dia, c_check_ruido, c_trad, c_filtro_imp, c_tz, c_btn_pc = st.columns([3.5, 1.4, 0.9, 1.2, 1.4, 0.8])
+    c_tit_dia, c_check_ruido, c_trad, c_filtro_imp, c_tz, c_btn_pc = st.columns([3.8, 1.3, 0.85, 1.2, 1.25, 0.8])
 
     with c_tit_dia:
-        st.subheader(f"📋 {f_sel.strftime('%d/%m/%Y')} | 🗽 NY {ahora_ny.strftime('%H:%M')} • {bandera_sel} {etiqueta_sel} {ahora_sel.strftime('%H:%M')} | {estado_radar}")
+        st.markdown(
+            f"<div style='font-size:1.12rem; font-weight:700; padding-top:26px; white-space:nowrap;'>"
+            f"📋 {f_sel.strftime('%d/%m/%Y')} | 🗽 NY {ahora_ny.strftime('%H:%M')} • {bandera_sel} {etiqueta_sel} {ahora_sel.strftime('%H:%M')} | {estado_radar}"
+            f"</div>",
+            unsafe_allow_html=True
+        )
 
     with c_check_ruido:
         st.write("")
-        filtro_estricto = st.checkbox("🛡️ Ocultar letras/agrícolas", value=False)
+        filtro_estricto = st.checkbox("🛡️ Ocultar letras/agrícolas", value=True)
 
     with c_trad:
         st.write("")
@@ -483,11 +573,9 @@ def renderizar_terminal():
             st.rerun()
 
     with c_btn_pc:
-        st.markdown('<div class="solo-pc">', unsafe_allow_html=True)
         if st.button("🔄 Actualizar", key="pc_sync_btn", use_container_width=True):
             st.cache_data.clear()
             st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
 
     # --- PROCESAMIENTO DE TABLAS ---
     if not df_mes.empty:
@@ -531,7 +619,7 @@ def renderizar_terminal():
                     st.info("Sin eventos programados para NAS100.")
 
             with col_x:
-                st.markdown("#### 🪙 XAUUSD")
+                st.markdown("#### 🥇 XAUUSD")
                 if filas_xau:
                     st.dataframe(pd.DataFrame(filas_xau), use_container_width=True, hide_index=True)
                 else:
@@ -568,9 +656,10 @@ def renderizar_terminal():
 
             resumen_dias = {}
             for f in df_mes['date'].dt.tz_convert(tz_sel).dt.date.unique():
-                f_nas = len(df_mes[(df_mes['date'].dt.tz_convert(tz_sel).dt.date == f) & df_mes.apply(es_relevante_nas100, axis=1)]) > 0
-                f_xau = len(df_mes[(df_mes['date'].dt.tz_convert(tz_sel).dt.date == f) & df_mes.apply(es_relevante_xauusd, axis=1)]) > 0
-                f_imp = df_mes[df_mes['date'].dt.tz_convert(tz_sel).dt.date == f]['importance'].max()
+                df_f = df_mes[df_mes['date'].dt.tz_convert(tz_sel).dt.date == f]
+                f_nas = len(df_f[df_f.apply(lambda r: es_relevante_nas100(r, filtro_estricto), axis=1)]) > 0
+                f_xau = len(df_f[df_f.apply(lambda r: es_relevante_xauusd(r, filtro_estricto), axis=1)]) > 0
+                f_imp = df_f['importance'].max()
                 resumen_dias[f] = {"nas": f_nas, "xau": f_xau, "imp": f_imp}
 
             cols_h = st.columns(7)
@@ -584,7 +673,7 @@ def renderizar_terminal():
                         if d != 0:
                             fc = date(st.session_state.anio_vista, st.session_state.mes_vista, d)
                             info = resumen_dias.get(fc, {"nas": False, "xau": False, "imp": -1})
-                            mrc = " ".join([m for cond, m in [(info["nas"], "🇺🇸"), (info["xau"], "🪙")] if cond])
+                            mrc = " • ".join([m for cond, m in [(info["nas"], "NAS"), (info["xau"], "XAU")] if cond])
                             dot = '🔴' if info['imp'] == 1 else '🟠' if info['imp'] == 0 else ''
                             hoy_mar = '📍' if fc == hoy_sel_date else ''
                             tipo_btn = "primary" if fc == f_sel else "secondary"
@@ -596,14 +685,15 @@ def renderizar_terminal():
         # --- BLOQUE MÓVIL ---
         with st.container():
             st.markdown('<span class="marker-movil"></span>', unsafe_allow_html=True)
-            nueva_f_mob = st.date_input("📅 Seleccionar Fecha:", value=f_sel, format="DD/MM/YYYY", key="mob_date")
-            if nueva_f_mob != f_sel:
-                st.session_state.fecha_seleccionada = nueva_f_mob
-                st.session_state.mes_vista = nueva_f_mob.month
-                st.session_state.anio_vista = nueva_f_mob.year
-                st.rerun()
+            st.date_input(
+                "📅 Seleccionar Fecha:",
+                value=f_sel,
+                format="DD/MM/YYYY",
+                key="mob_date",
+                on_change=al_cambiar_fecha_movil
+            )
 
-            tab_n, tab_x = st.tabs([f"🇺🇸 NAS100 ({len(filas_nas_mob)})", f"🪙 XAUUSD ({len(filas_xau_mob)})"])
+            tab_n, tab_x = st.tabs([f"🇺🇸 NAS100 ({len(filas_nas_mob)})", f"🥇 XAUUSD ({len(filas_xau_mob)})"])
             with tab_n:
                 st.markdown(construir_tarjetas_movil(filas_nas_mob, etiqueta_sel, bandera_sel), unsafe_allow_html=True)
             with tab_x:
@@ -618,28 +708,34 @@ def renderizar_terminal():
     if breaking_news:
         cols_bn = st.columns(2)
         for idx, bn in enumerate(breaking_news[:6]):
-            tag = " | ".join([t for t, c in [("🇺🇸 NAS100", bn['nas']), ("🪙 XAUUSD", bn['xau'])] if c])
+            tag = " | ".join([t for t, c in [("🇺🇸 NAS100", bn['nas']), ("🥇 XAUUSD", bn['xau'])] if c])
+            hora_n = bn['fecha_dt'].astimezone(tz_ny).strftime('%H:%M')
+            hora_s = bn['fecha_dt'].astimezone(tz_sel).strftime('%H:%M')
+            tit = html.escape(traducir_texto(bn['titulo'], traductor_on))
+            fuente = html.escape(bn['fuente'])
             with cols_bn[idx % 2]:
-                with st.container(border=True):
-                    hora_n = bn['fecha_dt'].astimezone(tz_ny).strftime('%H:%M')
-                    hora_s = bn['fecha_dt'].astimezone(tz_sel).strftime('%H:%M')
-                    tit = traducir_texto(bn['titulo'], traductor_on)
-                    st.markdown(f"**`🗽{hora_n} | {bandera_sel}{hora_s}` | {tag} | _{bn['fuente']}_**")
-                    st.markdown(f"**[{tit}]({bn['url']})**")
+                st.markdown(f"""
+                    <div class="bn-card">
+                        <div class="bn-meta">
+                            <span class="bn-time">🗽 {hora_n} | {bandera_sel} {hora_s}</span> &nbsp;|&nbsp; <b>{tag}</b> &nbsp;|&nbsp; <i>{fuente}</i>
+                        </div>
+                        <a href="{bn['url']}" target="_blank" class="bn-link">{tit}</a>
+                    </div>
+                """, unsafe_allow_html=True)
     else:
         st.info("Sin titulares imprevistos recientes.")
 
-    # --- BOTÓN FLOTANTE CELULAR ---
-    st.markdown('<div class="flotante-btn">', unsafe_allow_html=True)
-    if st.button("🔄", key="btn_flotante_sync"):
-        st.cache_data.clear()
-        st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
+    # --- BOTÓN FLOTANTE SOLO CELULAR ---
+    with st.container():
+        st.markdown('<span class="marker-flotante"></span>', unsafe_allow_html=True)
+        if st.button("🔄", key="btn_flotante_sync"):
+            st.cache_data.clear()
+            st.rerun()
 
     # --- GUÍA Y PIE DE PÁGINA ---
     st.markdown("---")
     with st.expander("📖 Guía de Uso del TERMINAL DE NOTICIAS"):
-        st.markdown(f"""
+        st.markdown("""
         - **🔴 Alto Impacto / 🟠 Medio Impacto / 🟡 Bajo Impacto:** Clasificación por volatilidad esperada en **NAS100** y **XAUUSD**.
         - **⚡ EN VIVO (10s):** Se activa automáticamente 2 minutos antes de un dato clave hasta 5 minutos después para capturar la publicación en tiempo real.
         - **🛡️ Ocultar letras/agrícolas:** Filtra subastas de bonos, reportes agrícolas (USDA) y energía para dejar solo macroeconomía relevante.
