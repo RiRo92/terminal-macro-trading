@@ -15,10 +15,13 @@ ARCHIVO_ESTADO = "estado_alertas.json"
 TZ_NY = pytz.timezone("America/New_York")
 TZ_BO = pytz.timezone("America/La_Paz")
 
+BANDERAS = {"US": "🇺🇸", "CA": "🇨🇦", "CN": "🇨🇳", "EU": "🇪🇺", "JP": "🇯🇵", "GB": "🇬🇧"}
+
 RUIDO = [
     "3-month", "6-month", "4-week", "8-week", "52-week", "bill auction",
-    "bond auction", "nopa", "soybean", "soja", "wheat", "trigo", "corn",
-    "maíz", "cattle", "ganado", "cotton", "algodón", "crude", "petróleo",
+    "bond auction", "tips auction", "note auction", "usda", "pork",
+    "nopa", "soybean", "soja", "wheat", "trigo", "corn", "maíz",
+    "cattle", "ganado", "cotton", "algodón", "crude", "petróleo",
     "oil", "gasoline", "gasolina", "natural gas", "gas natural",
     "baker hughes", "rig count", "distillate", "cushing", "eia", "api weekly"
 ]
@@ -70,6 +73,13 @@ def es_relevante(fila):
     if pais in ["CA", "CN", "EU", "JP", "GB"]:
         return imp == 1  # Extranjeras solo Alto impacto
     return False
+
+
+def obtener_activos(fila):
+    pais = fila.get("country", "")
+    if pais == "US":
+        return True, True, "🇺🇸 NAS100 | 🪙 XAUUSD"
+    return False, True, "🪙 XAUUSD"
 
 
 def obtener_datos():
@@ -182,12 +192,12 @@ def calcular_sesgo(fila):
 
     if not tiene_act:
         if dir_esp == 1:
-            return "⏳ Se espera Subida 📈"
+            return "⏳ Pendiente (Se espera Subida 📈)"
         if dir_esp == -1:
-            return "⏳ Se espera Caída 📉"
+            return "⏳ Pendiente (Se espera Caída 📉)"
         if dir_esp == 0:
-            return "⏳ Se espera Neutral ➖"
-        return "⏳ Sin pronóstico"
+            return "⏳ Pendiente (Se espera Neutral ➖)"
+        return "⏳ Pendiente (Sin pronóstico)"
 
     ref = pron if tiene_pron else ant
     if pd.isna(ref) or str(ref).strip() == "":
@@ -244,9 +254,18 @@ def enviar_resumen_hoy(df):
     lineas = [f"📋 *NOTICIAS DE HOY ({hoy_bo.strftime('%d/%m/%Y')})* — Medio y Alto Impacto\n"]
     for _, r in df_hoy.iterrows():
         ico = "🔴" if r["importance"] == 1 else "🟠"
+        band = BANDERAS.get(r["country"], "🌐")
+        _, _, activos_txt = obtener_activos(r)
         h_ny = r["date"].astimezone(TZ_NY).strftime("%H:%M")
         h_bo = r["date"].astimezone(TZ_BO).strftime("%H:%M")
-        lineas.append(f"{ico} `{h_ny} NY | {h_bo} BO` — {r['title']}")
+        sesgo = calcular_sesgo(r)
+        bloque = (
+            f"{ico} `{h_ny} NY | {h_bo} BO` — {band} *{r['title']}*\n"
+            f"   🎯 *Activos:* {activos_txt}\n"
+            f"   📊 Ant: `{fmt(r['previous'])}` | Pron: `{fmt(r['forecast'])}` | Real: `{fmt(r['actual'])}`\n"
+            f"   🧭 {sesgo}\n"
+        )
+        lineas.append(bloque)
     enviar_telegram("\n".join(lineas))
 
 
@@ -261,7 +280,6 @@ def ejecutar():
 
     estado = cargar_estado()
     ahora_utc = datetime.now(pytz.utc)
-    banderas = {"US": "🇺🇸", "CA": "🇨🇦", "CN": "🇨🇳", "EU": "🇪🇺", "JP": "🇯🇵", "GB": "🇬🇧"}
 
     for _, r in df.iterrows():
         if not es_relevante(r):
@@ -273,7 +291,8 @@ def ejecutar():
         fases = estado.get(ev_id, [])
 
         imp_txt = "🔴 ALTO IMPACTO" if r["importance"] == 1 else "🟠 MEDIO IMPACTO"
-        band = banderas.get(r["country"], "🌐")
+        band = BANDERAS.get(r["country"], "🌐")
+        es_nas, es_xau, activos_txt = obtener_activos(r)
         h_ny = fecha_ev.astimezone(TZ_NY).strftime("%H:%M")
         h_bo = fecha_ev.astimezone(TZ_BO).strftime("%H:%M")
         sesgo = calcular_sesgo(r)
@@ -283,10 +302,11 @@ def ejecutar():
             msg = (
                 f"🚨 *ALERTA 1/3 — NOTICIA PRÓXIMA* 🚨\n\n"
                 f"*{imp_txt}*\n"
+                f"🎯 *Activos:* {activos_txt}\n"
                 f"📌 {band} {r['title']}\n"
                 f"🕒 *NY:* {h_ny} | *BO:* {h_bo}\n"
-                f"📊 Ant: `{fmt(r['previous'])}` | Pron: `{fmt(r['forecast'])}`\n"
-                f"🧭 {sesgo}"
+                f"📊 Ant: `{fmt(r['previous'])}` | Pron: `{fmt(r['forecast'])}` | Real: `{fmt(r['actual'])}`\n"
+                f"🧭 *Proyección:* {sesgo}"
             )
             enviar_telegram(msg)
             fases.append("1")
@@ -296,6 +316,7 @@ def ejecutar():
         if "2" not in fases and (-15 <= diff_min <= 0) and (tiene_real or r["es_discurso"]):
             msg = (
                 f"⚡ *ALERTA 2/3 — DATO CONFIRMADO* ⚡\n\n"
+                f"🎯 *Activos:* {activos_txt}\n"
                 f"📌 {band} {r['title']}\n"
                 f"📊 Ant: `{fmt(r['previous'])}` | Pron: `{fmt(r['forecast'])}` | *Real:* `{fmt(r['actual'])}`\n"
                 f"🧭 *Resultado:* {sesgo}"
@@ -305,14 +326,19 @@ def ejecutar():
 
         # ALERTA 3: 5 min después (cierre de vela M5 y reacción del precio)
         if "3" not in fases and (-20 <= diff_min <= -5):
-            vela_xau = leer_vela_m5("GC=F", "XAUUSD (Futuro Oro)")
-            vela_nas = leer_vela_m5("NQ=F", "NAS100 (Futuro Nasdaq)")
+            velas = []
+            if es_xau:
+                velas.append(leer_vela_m5("GC=F", "XAUUSD (Futuro Oro)"))
+            if es_nas:
+                velas.append(leer_vela_m5("NQ=F", "NAS100 (Futuro Nasdaq)"))
             msg = (
                 f"🕯️ *ALERTA 3/3 — CIERRE VELA M5 (+5 MIN)* 🕯️\n\n"
+                f"🎯 *Activos:* {activos_txt}\n"
                 f"📌 {band} {r['title']}\n"
+                f"📊 Ant: `{fmt(r['previous'])}` | Pron: `{fmt(r['forecast'])}` | *Real:* `{fmt(r['actual'])}`\n"
                 f"🧭 *Dato:* {sesgo}\n\n"
                 f"📉 *Reacción del precio (Vela M5):*\n"
-                f"{vela_xau}\n{vela_nas}"
+                + "\n".join(velas)
             )
             enviar_telegram(msg)
             fases.append("3")
